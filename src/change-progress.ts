@@ -1,0 +1,85 @@
+// Reads openspec/changes from disk and works out each change's stage. All disk access goes
+// through `Files`, so tests can stand in for the file system.
+import type { ChangeRow, ChangeStage, Count } from './protocol'
+
+export interface Files {
+  /** Names of the folders and files in a folder, or null when it does not exist. */
+  list(path: string): Promise<string[] | null>
+  /** File text, or null when it does not exist. */
+  text(path: string): Promise<string | null>
+}
+
+const ARCHIVE = 'archive'
+const TASK_LINE = /^\s*[-*]\s+\[([ xX])\]/gm
+
+export function countTasks(markdown: string): Count {
+  let done = 0
+  let total = 0
+  for (const match of markdown.matchAll(TASK_LINE)) {
+    total += 1
+    if (match[1] !== ' ') {
+      done += 1
+    }
+  }
+  return { done, total }
+}
+
+/** Planning until all four artefacts exist; then ready, in progress, complete by task ticks. */
+export function stageOf(artefacts: Count, tasks: Count): ChangeStage {
+  if (artefacts.done < artefacts.total) {
+    return 'planning'
+  }
+  if (tasks.total > 0 && tasks.done === tasks.total) {
+    return 'complete'
+  }
+  return tasks.done > 0 ? 'in-progress' : 'ready'
+}
+
+async function readChange(files: Files, changesDir: string, name: string): Promise<ChangeRow> {
+  const dir = `${changesDir}/${name}`
+  // The default spec-driven schema: proposal, design, specs and tasks.
+  const [proposal, design, tasks, specs] = await Promise.all([
+    files.text(`${dir}/proposal.md`),
+    files.text(`${dir}/design.md`),
+    files.text(`${dir}/tasks.md`),
+    files.list(`${dir}/specs`)
+  ])
+  const present = [proposal, design, tasks].filter((text) => text !== null).length + (specs && specs.length > 0 ? 1 : 0)
+  const artefacts = { done: present, total: 4 }
+  const taskCount = tasks ? countTasks(tasks) : { done: 0, total: 0 }
+  return { name, stage: stageOf(artefacts, taskCount), artefacts, tasks: taskCount }
+}
+
+/** The markdown files of a change, relative to its folder: proposal, design, tasks, then each spec. */
+export async function listChangeFiles(files: Files, workspacePath: string, changeName: string): Promise<string[]> {
+  const dir = `${workspacePath}/openspec/changes/${changeName}`
+  const found: string[] = []
+  for (const name of ['proposal.md', 'design.md', 'tasks.md']) {
+    if ((await files.text(`${dir}/${name}`)) !== null) {
+      found.push(name)
+    }
+  }
+  for (const capability of ((await files.list(`${dir}/specs`)) ?? []).sort()) {
+    if ((await files.text(`${dir}/specs/${capability}/spec.md`)) !== null) {
+      found.push(`specs/${capability}/spec.md`)
+    }
+  }
+  return found
+}
+
+/** null when the workspace has no openspec/changes folder. Folders only; `archive` is skipped. */
+export async function readChanges(files: Files, workspacePath: string): Promise<ChangeRow[] | null> {
+  const changesDir = `${workspacePath}/openspec/changes`
+  const names = await files.list(changesDir)
+  if (!names) {
+    return null
+  }
+  const rows: ChangeRow[] = []
+  for (const name of names.filter((entry) => entry !== ARCHIVE && !entry.startsWith('.')).sort()) {
+    // A plain file such as README.md has no proposal folder, so it lists as null and is skipped.
+    if ((await files.list(`${changesDir}/${name}`)) !== null) {
+      rows.push(await readChange(files, changesDir, name))
+    }
+  }
+  return rows
+}
