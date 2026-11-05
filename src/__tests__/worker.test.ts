@@ -1,5 +1,5 @@
 import { assert, mockHost, mountWorker, test } from 'orca/testing'
-import { applyCommand, register, type Io } from './handlers'
+import { applyCommand, register, type Io } from '../handlers'
 
 // Orca reports local workspaces with hostId "local" (seen in a real run), not null.
 const WORKSPACES = [

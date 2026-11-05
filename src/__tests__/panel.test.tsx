@@ -1,6 +1,6 @@
 import { assert, mockHost, mount, test } from 'orca/testing'
-import * as panel from './panel'
-import type { ChangesSnapshot } from './protocol'
+import * as panel from '../panel'
+import type { ChangesSnapshot } from '../protocol'
 
 const snapshot: ChangesSnapshot = {
   checkedAt: 1,

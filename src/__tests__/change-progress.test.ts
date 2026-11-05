@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { countTasks, openTasks, readChanges, splitSections, stageOf, type Files } from './change-progress'
+import { countTasks, openTasks, readChanges, splitSections, stageOf, type Files } from '../change-progress'
 
 /** A fake disk: a map of file path to text. A folder exists when any file sits under it. */
 function fakeFiles(tree: Record<string, string>): Files {
