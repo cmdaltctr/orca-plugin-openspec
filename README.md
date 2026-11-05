@@ -10,8 +10,18 @@ A board of the OpenSpec changes in the workspace you are looking at. Each change
   `feat/*` worktrees) appear in the Worktree menu as read-only views. The check is the shared
   Git common directory, so a worktree of a different repository is never listed.
 - **Apply.** Pick an agent terminal and press Apply on a Ready or In progress change. The plugin types
-  `/opsx:apply <change>` (Claude Code) or `/opsx-apply <change>` (other agents) into that terminal.
-  Apply is available on the focused worktree only, because the agent list covers that workspace.
+  `/opsx:apply <change>` (Claude Code) or `/opsx-apply <change>` (other agents) into that terminal,
+  followed by one line that asks the agent to use the `omms:omms-memory` skill. Apply is available on
+  the focused worktree only, because the agent list covers that workspace.
+- **Cards.** Every file of a change (proposal, design, tasks, specs) shows each `##` section in its own card.
+- **Agent menu help.** The "i" button beside "Send to agent" shows a tooltip on hover. Click it to open
+  a short explanation of which agents are listed and what Apply types.
+- **Todo tab.** Open a change and choose the `todo` tab to see the unticked tasks from `tasks.md`,
+  one card per task under its section heading. The tab has an agent menu and an "Apply all" button for
+  the whole change. Each card has its own Apply, which asks the agent to do only that task and tick it.
+  The buttons always show. When Apply cannot run (sibling worktree, change not Ready or In progress,
+  no agent picked) the button is greyed out and its tooltip gives the reason.
+  The plugin checks that the task is still an unticked line of `tasks.md` before it types anything.
 
 ## Stages
 

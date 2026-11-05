@@ -99,7 +99,17 @@ test('apply types the command only for a ready or in-progress change of the focu
   assert.equal((await ask('w-v3', 'alpha', 'gone')).sent, false)
   assert.equal(host.callsOf('terminal.sendText').length, 0)
   assert.equal((await ask('w-v3', 'alpha')).sent, true)
-  assert.deepEqual(host.callsOf('terminal.sendText')[0], { terminalId: 't1', text: '/opsx:apply alpha', enter: true })
+  // One task: only an unticked task listed in tasks.md goes through.
+  const askTask = (task: string) => worker.request('change.apply', { workspaceId: 'w-v3', changeName: 'alpha', terminalId: 't1', task })
+  assert.equal((await askTask('a')).sent, false)
+  assert.equal((await askTask('invented')).sent, false)
+  assert.equal(host.callsOf('terminal.sendText').length, 1)
+  assert.equal((await askTask('b')).sent, true)
+  assert.match(host.callsOf('terminal.sendText')[1]?.text ?? '', /^\/opsx:apply alpha .*"b".*omms:omms-memory/)
+  const [sent] = host.callsOf('terminal.sendText')
+  assert.equal(sent?.terminalId, 't1')
+  assert.equal(sent?.enter, true)
+  assert.match(sent?.text ?? '', /^\/opsx:apply alpha .*omms:omms-memory/)
   await worker.deactivate()
 })
 
@@ -121,8 +131,9 @@ test('lists, reads and saves files of a listed change, only in the focused workt
   await worker.deactivate()
 })
 
-test('applyCommand picks the slash style of the agent', () => {
-  assert.equal(applyCommand('claude', 'x'), '/opsx:apply x')
-  assert.equal(applyCommand('opencode', 'x'), '/opsx-apply x')
-  assert.equal(applyCommand(null, 'x'), '/opsx-apply x')
+test('applyCommand picks the slash style of the agent and asks for omms memory', () => {
+  assert.match(applyCommand('claude', 'x'), /^\/opsx:apply x /)
+  assert.match(applyCommand('opencode', 'x'), /^\/opsx-apply x /)
+  assert.match(applyCommand(null, 'x'), /^\/opsx-apply x /)
+  assert.match(applyCommand('claude', 'x'), /omms:omms-memory/)
 })

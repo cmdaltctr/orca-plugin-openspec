@@ -2,11 +2,14 @@
 import {
   atom,
   Badge,
+  Box,
   Button,
+  Callout,
   Card,
   EmptyState,
   Heading,
   host,
+  IconButton,
   Markdown,
   on,
   plugin,
@@ -23,6 +26,7 @@ import {
   Textarea,
   type PanelContext
 } from 'orca'
+import { openTasks, splitSections } from './change-progress'
 import type { ChangeRef, ChangeRow, ChangesSnapshot, ChangeStage, WorkspaceView } from './protocol'
 
 const POLL_MS = 30_000
@@ -67,11 +71,11 @@ async function loadAgents(): Promise<void> {
   }
 }
 
-async function apply(view: WorkspaceView, change: ChangeRow): Promise<void> {
+async function apply(view: WorkspaceView, change: ChangeRow, task?: string): Promise<void> {
   try {
     const result = await plugin.request(
       'change.apply',
-      { workspaceId: view.workspaceId, changeName: change.name, terminalId: read(agentChoice) },
+      { workspaceId: view.workspaceId, changeName: change.name, terminalId: read(agentChoice), ...(task ? { task } : {}) },
       REQUEST
     )
     set(notice, result.message)
@@ -89,12 +93,15 @@ const fileText = atom<string | null>(null)
 const editing = atom(false)
 const draft = atom('')
 
+/** A tab of its own that shows the unticked tasks of tasks.md. */
+const TODO = 'todo'
+
 async function chooseFile(ref: ChangeRef, path: string): Promise<void> {
   set(fileChoice, path)
   set(fileText, null)
   set(editing, false)
   try {
-    const { text } = await plugin.request('file.read', { ...ref, path }, REQUEST)
+    const { text } = await plugin.request('file.read', { ...ref, path: path === TODO ? 'tasks.md' : path }, REQUEST)
     // Ignore an answer for a file the person has already left.
     if (read(fileChoice) === path) {
       set(fileText, text ?? '')
@@ -145,14 +152,121 @@ async function save(ref: ChangeRef): Promise<void> {
 
 const fileLabel = (path: string): string => (path.startsWith('specs/') ? path.split('/')[1] : path.replace(/\.md$/, ''))
 
+const canApply = (view: WorkspaceView, change: ChangeRow): boolean =>
+  view.focused && (change.stage === 'ready' || change.stage === 'in-progress')
+
+const agentHelpOpen = atom(false)
+
+function AgentSelect() {
+  const options = read(agentOptions)
+  if (options.length === 0) {
+    return null
+  }
+  return (
+    <Stack gap="xs">
+      <Row gap="xs" align="end">
+        <Select
+          label="Send to agent"
+          placeholder="Pick an agent terminal"
+          value={read(agentChoice)}
+          options={options}
+          onChange={(value) => set(agentChoice, value)}
+        />
+        <IconButton
+          icon="info"
+          label="About Send to agent"
+          tooltip="Which running agent gets the Apply command. Click for details."
+          variant="ghost"
+          onPress={() => set(agentHelpOpen, !read(agentHelpOpen))}
+        />
+      </Row>
+      {read(agentHelpOpen) ? (
+        <Callout icon="info">
+          <Stack gap="xs">
+            <Text size="xs">Apply types its command into the agent you pick here and presses Enter.</Text>
+            <Text size="xs">Only agents in the focused worktree are listed.</Text>
+            <Text size="xs">Focus another worktree in Orca to see its agents.</Text>
+            <Text size="xs">The word in brackets is the agent's state. An agent that is working receives the text mid-task, so pick one that is idle or waiting.</Text>
+          </Stack>
+        </Callout>
+      ) : null}
+    </Stack>
+  )
+}
+
+/** Why Apply is off, in words for a tooltip; null when it can run. */
+function applyBlocker(view: WorkspaceView, change: ChangeRow): string | null {
+  if (!view.focused) {
+    return 'Sibling worktree: switch to it in Orca to apply'
+  }
+  if (change.stage !== 'ready' && change.stage !== 'in-progress') {
+    return 'Only a Ready or In progress change can be applied'
+  }
+  return read(agentChoice) ? null : 'Pick an agent terminal first'
+}
+
+function ApplyButton({ view, change, task, label = 'Apply' }: { view: WorkspaceView; change: ChangeRow; task?: string; label?: string }) {
+  const blocker = applyBlocker(view, change)
+  return (
+    <Button
+      variant="solid"
+      tone="success"
+      icon="play"
+      disabled={blocker !== null}
+      tooltip={blocker ?? undefined}
+      onPress={() => void apply(view, change, task)}
+    >
+      {label}
+    </Button>
+  )
+}
+
+/** A markdown file with each `##` section in its own card. */
+function SectionCards({ text }: { text: string }) {
+  const { preface, sections } = splitSections(text)
+  return (
+    <Stack gap="sm">
+      {preface ? <Markdown content={preface} /> : null}
+      {sections.map((section, index) => (
+        <Card key={`${index}-${section.slice(0, 40)}`}>
+          <Markdown content={section} />
+        </Card>
+      ))}
+    </Stack>
+  )
+}
+
 function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) {
   const ref = { workspaceId: view.workspaceId, changeName: change.name }
   const choice = read(fileChoice)
   const text = read(fileText)
   const isEditing = read(editing)
+  const left = text === null ? [] : openTasks(text)
   const body =
     text === null ? (
       <Spinner label="Reading file" />
+    ) : choice === TODO ? (
+      <Stack gap="xs">
+        <Row justify="between" align="center">
+          <Text muted size="xs">{`${change.tasks.total - change.tasks.done} of ${change.tasks.total} tasks left`}</Text>
+          <ApplyButton view={view} change={change} label="Apply all" />
+        </Row>
+        {view.focused ? <AgentSelect /> : null}
+        {left.length === 0 ? <Text muted size="xs">No tasks left.</Text> : null}
+        {left.map((task, index) => (
+          <Stack key={`${index}-${task.text}`} gap="xs">
+            {task.section !== null && task.section !== left[index - 1]?.section ? <Text weight="semibold">{task.section}</Text> : null}
+            <Card>
+              <Stack gap="xs">
+                <Markdown content={task.text} />
+                <Row>
+                  <ApplyButton view={view} change={change} task={task.text} />
+                </Row>
+              </Stack>
+            </Card>
+          </Stack>
+        ))}
+      </Stack>
     ) : isEditing ? (
       <Stack gap="xs">
         <Textarea label={`Edit ${choice}`} labelHidden rows={20} value={read(draft)} onChange={(value) => set(draft, value)} />
@@ -181,27 +295,31 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
             </Button>
           </Row>
         ) : null}
-        <Markdown content={text} />
+        <SectionCards text={text} />
       </Stack>
     )
   return (
     <Stack gap="sm">
       <Row justify="between" align="center">
         <Heading>{change.name}</Heading>
-        <Button variant="ghost" onPress={closeFiles}>
+        <Button variant="outline" onPress={closeFiles}>
           Back to changes
         </Button>
       </Row>
       {read(files).length === 0 ? (
         <Text muted size="xs">This change has no markdown files yet.</Text>
       ) : (
-        <Tabs label={`${change.name} files`} value={choice} onChange={(path) => void chooseFile(ref, path)}>
-          {read(files).map((path) => (
-            <Tab key={path} value={path} label={fileLabel(path)} disabled={isEditing && path !== choice}>
-              {body}
-            </Tab>
-          ))}
-        </Tabs>
+        <>
+          {/* The tabs hold labels only, so the strip scrolls sideways on its own and the body stays put. */}
+          <Box scroll="x">
+            <Tabs label={`${change.name} files`} value={choice} onChange={(path) => void chooseFile(ref, path)}>
+              {read(files).flatMap((path) => (path === 'tasks.md' ? [path, TODO] : [path])).map((path) => (
+                <Tab key={path} value={path} label={fileLabel(path)} disabled={isEditing && path !== choice} />
+              ))}
+            </Tabs>
+          </Box>
+          {body}
+        </>
       )}
     </Stack>
   )
@@ -227,7 +345,6 @@ const percent = (done: number, total: number): number => (total === 0 ? 0 : Math
 
 function ChangeCard({ view, change }: { view: WorkspaceView; change: ChangeRow }) {
   const { artefacts, tasks } = change
-  const canApply = view.focused && (change.stage === 'ready' || change.stage === 'in-progress')
   return (
     <Card title={change.name}>
       <Stack gap="xs">
@@ -245,17 +362,7 @@ function ChangeCard({ view, change }: { view: WorkspaceView; change: ChangeRow }
           <Button variant="outline" icon="file-text" onPress={() => void openFiles(view, change)}>
             Open
           </Button>
-          {canApply ? (
-            <Button
-              variant="outline"
-              icon="play"
-              disabled={!read(agentChoice)}
-              tooltip={read(agentChoice) ? undefined : 'Pick an agent terminal first'}
-              onPress={() => void apply(view, change)}
-            >
-              Apply
-            </Button>
-          ) : null}
+          {canApply(view, change) ? <ApplyButton view={view} change={change} /> : null}
         </Row>
       </Stack>
     </Card>
@@ -302,7 +409,6 @@ export default function Panel() {
   const views = current?.views ?? []
   const chosen = read(viewChoice)
   const view = views.find((v) => v.workspaceId === chosen) ?? views.find((v) => v.focused) ?? views[0]
-  const options = read(agentOptions)
   const open = read(openChange)
   const openView = open ? views.find((v) => v.workspaceId === open.workspaceId) : undefined
   const openRow = openView?.changes?.find((c) => c.name === open?.changeName)
@@ -336,15 +442,7 @@ export default function Panel() {
           onChange={(value) => set(viewChoice, value)}
         />
       ) : null}
-      {view?.focused && options.length > 0 ? (
-        <Select
-          label="Send to agent"
-          placeholder="Pick an agent terminal"
-          value={read(agentChoice)}
-          options={options}
-          onChange={(value) => set(agentChoice, value)}
-        />
-      ) : null}
+      {view?.focused ? <AgentSelect /> : null}
       {view && !view.focused ? (
         <Text muted size="xs">Sibling worktree: read only. Switch to it in Orca to apply a change.</Text>
       ) : null}

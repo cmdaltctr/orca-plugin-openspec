@@ -24,6 +24,37 @@ export function countTasks(markdown: string): Count {
   return { done, total }
 }
 
+/** Cuts a markdown file at each `##` heading. `preface` is the text before the first one. */
+export function splitSections(markdown: string): { preface: string; sections: string[] } {
+  const parts = markdown.replace(/\n+$/, '').split(/\n(?=## )/)
+  const first = parts[0] ?? ''
+  if (first.startsWith('## ')) {
+    return { preface: '', sections: parts }
+  }
+  return { preface: first, sections: parts.slice(1) }
+}
+
+/** One unticked task of a tasks.md and the heading it sits under. */
+export interface OpenTask {
+  section: string | null
+  text: string
+}
+
+export function openTasks(markdown: string): OpenTask[] {
+  const found: OpenTask[] = []
+  let section: string | null = null
+  for (const line of markdown.split('\n')) {
+    const heading = /^#{1,6}\s+(.*)$/.exec(line)
+    const task = /^\s*[-*]\s+\[ \]\s*(.*)$/.exec(line)
+    if (heading) {
+      section = heading[1].trim()
+    } else if (task) {
+      found.push({ section, text: task[1].trim() })
+    }
+  }
+  return found
+}
+
 /** Planning until all four artefacts exist; then ready, in progress, complete by task ticks. */
 export function stageOf(artefacts: Count, tasks: Count): ChangeStage {
   if (artefacts.done < artefacts.total) {

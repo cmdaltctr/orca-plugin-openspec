@@ -1,6 +1,6 @@
 // The worker's logic. `register` takes the Io so tests can replace the disk and git.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { listChangeFiles, readChanges, type Files } from './change-progress'
+import { listChangeFiles, openTasks, readChanges, type Files } from './change-progress'
 import type { ChangeRef, ChangesSnapshot, WorkspaceView } from './protocol'
 
 export interface Io extends Files {
@@ -20,9 +20,14 @@ interface Workspace {
   hostId: string | null
 }
 
-/** The command that starts apply. Claude Code writes `/opsx:apply`; other agents write `/opsx-apply`. */
-export function applyCommand(agentKind: string | null, changeName: string): string {
-  return `${agentKind?.toLowerCase().includes('claude') ? '/opsx:apply' : '/opsx-apply'} ${changeName}`
+const MEMORY_NOTE =
+  'Use the omms:omms-memory skill: search project memory before you start, and save each decision and bug fix as you go.'
+
+/** The text that starts apply. Claude Code writes `/opsx:apply`; other agents write `/opsx-apply`. */
+export function applyCommand(agentKind: string | null, changeName: string, task?: string): string {
+  const command = agentKind?.toLowerCase().includes('claude') ? '/opsx:apply' : '/opsx-apply'
+  const scope = task ? ` Do only this task, then tick it in tasks.md: "${task}".` : ''
+  return `${command} ${changeName}${scope} ${MEMORY_NOTE}`
 }
 
 /** Orca names the machine it runs on `local`; SSH and paired hosts have other ids. */
@@ -132,12 +137,19 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return { ok: true, message: `Saved ${ref.path}` }
   })
 
-  orca.panels.handle('change.apply', async ({ workspaceId, changeName, terminalId }) => {
+  orca.panels.handle('change.apply', async ({ workspaceId, changeName, terminalId, task }) => {
     // Only a ready or in-progress change of the focused workspace that the panel listed.
     const view = last?.views.find((v) => v.workspaceId === workspaceId)
     const change = view?.changes?.find((c) => c.name === changeName)
     if (!view?.focused || !change || (change.stage !== 'ready' && change.stage !== 'in-progress')) {
       return { sent: false, message: 'That change cannot be applied from here' }
+    }
+    // A single task must be an unticked line of the change's tasks.md, so nothing else is typed.
+    if (task !== undefined) {
+      const tasksText = await io.text(`${paths.get(workspaceId)}/openspec/changes/${changeName}/tasks.md`)
+      if (!openTasks(tasksText ?? '').some((open) => open.text === task)) {
+        return { sent: false, message: 'That task is not open any more' }
+      }
     }
     // Type only into a terminal Orca still lists as an agent, never into a stale id.
     const { agents } = await orca.host.call('agents.list')
@@ -145,7 +157,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     if (!agent) {
       return { sent: false, message: 'That agent terminal is gone' }
     }
-    const text = applyCommand(agent.agent, changeName)
+    const text = applyCommand(agent.agent, changeName, task)
     const { accepted } = await orca.host.call('terminal.sendText', { terminalId, text, enter: true })
     return { sent: accepted, message: accepted ? `Sent ${text}` : 'Orca did not accept the text' }
   })

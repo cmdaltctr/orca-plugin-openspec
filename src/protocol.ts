@@ -50,9 +50,9 @@ declare module 'orca' {
       input: ChangeRef & { path: string; text: string }
       output: { ok: boolean; message: string }
     }
-    /** Types the apply command into an agent terminal of the focused workspace. */
+    /** Types the apply command into an agent terminal of the focused workspace. With `task`, asks for that one unticked task only. */
     'change.apply': {
-      input: { workspaceId: string; changeName: string; terminalId: string }
+      input: { workspaceId: string; changeName: string; terminalId: string; task?: string }
       output: { sent: boolean; message: string }
     }
   }

@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { countTasks, readChanges, stageOf, type Files } from './change-progress'
+import { countTasks, openTasks, readChanges, splitSections, stageOf, type Files } from './change-progress'
 
 /** A fake disk: a map of file path to text. A folder exists when any file sits under it. */
 function fakeFiles(tree: Record<string, string>): Files {
@@ -17,6 +17,26 @@ const ROOT = '/repo/openspec/changes'
 
 test('countTasks counts ticked and unticked checkboxes only', () => {
   assert.deepEqual(countTasks('# Tasks\n- [x] a\n- [ ] b\n  - [X] nested\nplain [ ] text\n* [ ] star'), { done: 2, total: 4 })
+})
+
+test('openTasks lists unticked tasks with their section heading', () => {
+  const tasks = '# Tasks\n## 1. Setup\n- [x] a\n- [x] b\n## 2. Build\n- [x] c\n- [ ] 2.2 d `code`\n  - [ ] nested\n* [ ] e\n'
+  assert.deepEqual(openTasks(tasks), [
+    { section: '2. Build', text: '2.2 d `code`' },
+    { section: '2. Build', text: 'nested' },
+    { section: '2. Build', text: 'e' }
+  ])
+  assert.deepEqual(openTasks('## Done\n- [x] a'), [])
+  assert.deepEqual(openTasks('- [ ] loose'), [{ section: null, text: 'loose' }])
+})
+
+test('splitSections cuts at each ## heading and keeps the text before the first one', () => {
+  const md = '# Tasks\nintro\n## 1. Setup\n- [x] a\n### sub\n- [ ] b\n## 2. Build\n- [ ] c\n'
+  assert.deepEqual(splitSections(md), {
+    preface: '# Tasks\nintro',
+    sections: ['## 1. Setup\n- [x] a\n### sub\n- [ ] b', '## 2. Build\n- [ ] c']
+  })
+  assert.deepEqual(splitSections('- [ ] loose'), { preface: '- [ ] loose', sections: [] })
 })
 
 test('stageOf follows artefacts then task ticks', () => {
