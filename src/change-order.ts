@@ -26,7 +26,7 @@ export interface OrderInput {
   /** `created:` from .openspec.yaml; '' when missing. */
   created: string
   /** Number set by hand, or null. */
-  pinned: number | null
+  manual: number | null
   deps: string[]
 }
 
@@ -37,14 +37,14 @@ export function numberChanges(changes: OrderInput[]): Map<string, number> {
   const result = new Map<string, number>()
   const taken = new Set<number>()
   for (const change of changes) {
-    if (change.pinned !== null) {
-      result.set(change.name, change.pinned)
-      taken.add(change.pinned)
+    if (change.manual !== null) {
+      result.set(change.name, change.manual)
+      taken.add(change.manual)
     }
   }
   // Dependency order: take the oldest change whose dependencies are all placed. A loop falls back to age.
-  const waiting = changes.filter((change) => change.pinned === null).sort(byAge)
-  const placed = new Set(changes.filter((change) => change.pinned !== null).map((change) => change.name))
+  const waiting = changes.filter((change) => change.manual === null).sort(byAge)
+  const placed = new Set(changes.filter((change) => change.manual !== null).map((change) => change.name))
   const known = new Set(waiting.map((change) => change.name))
   let next = 1
   while (waiting.length > 0) {
@@ -71,14 +71,22 @@ export function readCreated(yaml: string | null): string {
   return (yaml && /^created:\s*(\S+)/m.exec(yaml)?.[1]) || ''
 }
 
-/** .openspec.yaml with its `order:` line set to `order`, or removed when null. Other lines stay as they are. */
-export function writeOrder(yaml: string | null, order: number | null): string {
-  const lines = (yaml ?? '').split('\n').filter((line) => !/^order:/.test(line))
+/** .openspec.yaml with its `key:` line set to `value`, or removed when null. Other lines stay as they are. */
+function writeLine(yaml: string | null, key: string, value: string | null): string {
+  const lines = (yaml ?? '').split('\n').filter((line) => !line.startsWith(`${key}:`))
   while (lines.length > 0 && lines[lines.length - 1] === '') {
     lines.pop()
   }
-  if (order !== null) {
-    lines.push(`order: ${order}`)
+  if (value !== null) {
+    lines.push(`${key}: ${value}`)
   }
   return lines.length > 0 ? `${lines.join('\n')}\n` : ''
 }
+
+export const writeOrder = (yaml: string | null, order: number | null): string =>
+  writeLine(yaml, 'order', order === null ? null : String(order))
+
+/** True when .openspec.yaml has `pin: true`: the card stays at the top of its stage. */
+export const readPin = (yaml: string | null): boolean => /^pin:\s*true\s*$/m.test(yaml ?? '')
+
+export const writePin = (yaml: string | null, pin: boolean): string => writeLine(yaml, 'pin', pin ? 'true' : null)

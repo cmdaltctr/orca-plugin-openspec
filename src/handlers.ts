@@ -1,7 +1,7 @@
 // The worker's logic. `register` takes the Io so tests can replace the disk and git.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { listChangeFiles, openTasks, readChanges, type Files } from './change-progress'
-import { writeOrder } from './change-order'
+import { writeOrder, writePin } from './change-order'
 import type { ChangeRef, ChangesSnapshot, WorkspaceView } from './protocol'
 
 export interface Io extends Files {
@@ -156,6 +156,21 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     }
     last = await look()
     return { ok: true, message: order === null ? `${changeName} follows Depends on again` : `${changeName} runs #${order}` }
+  })
+
+  orca.panels.handle('change.pin', async ({ workspaceId, changeName, pin }) => {
+    const view = last?.views.find((v) => v.workspaceId === workspaceId)
+    if (!view?.focused || !view.changes?.some((c) => c.name === changeName)) {
+      return { ok: false, message: 'Pins can be set only in the focused worktree' }
+    }
+    const file = `${paths.get(workspaceId)}/openspec/changes/${changeName}/.openspec.yaml`
+    try {
+      await io.write(file, writePin(await io.text(file), pin === true))
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+    last = await look()
+    return { ok: true, message: pin ? `Pinned ${changeName}` : `Unpinned ${changeName}` }
   })
 
   orca.panels.handle('change.apply', async ({ workspaceId, changeName, terminalId, task }) => {

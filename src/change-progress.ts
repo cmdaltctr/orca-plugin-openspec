@@ -1,6 +1,6 @@
 // Reads openspec/changes from disk and works out each change's stage. All disk access goes
 // through `Files`, so tests can stand in for the file system.
-import { dependsOn, numberChanges, readCreated, readOrder } from './change-order'
+import { dependsOn, numberChanges, readCreated, readOrder, readPin } from './change-order'
 import type { ChangeRow, ChangeStage, Count } from './protocol'
 
 export interface Files {
@@ -69,7 +69,7 @@ export function stageOf(artefacts: Count, tasks: Count): ChangeStage {
 
 /** One change before its run order is known: the row, plus what the order needs. */
 interface ReadChange {
-  row: Omit<ChangeRow, 'order' | 'pinned'>
+  row: Omit<ChangeRow, 'order' | 'manual' | 'pin'>
   proposal: string | null
   yaml: string | null
 }
@@ -126,11 +126,11 @@ export async function readChanges(files: Files, workspacePath: string): Promise<
     read.map(({ row, proposal, yaml }) => ({
       name: row.name,
       created: readCreated(yaml),
-      pinned: readOrder(yaml),
+      manual: readOrder(yaml),
       deps: dependsOn(proposal, all, row.name)
     }))
   )
   return read
-    .map(({ row, yaml }) => ({ ...row, order: order.get(row.name) ?? 0, pinned: readOrder(yaml) !== null }))
+    .map(({ row, yaml }) => ({ ...row, order: order.get(row.name) ?? 0, manual: readOrder(yaml) !== null, pin: readPin(yaml) }))
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
 }

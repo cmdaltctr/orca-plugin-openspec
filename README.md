@@ -21,6 +21,9 @@ A board of the OpenSpec changes in the workspace you are looking at. Each change
   hand-set number has an outlined button.
 - **Sort.** Each stage with two or more cards has a "Run order ↑" button next to its count.
   Press it to show the highest number first ("Run order ↓"). Press again for #1 first.
+- **Pin.** Press the star next to the run number to pin a change. A pinned change stays at the top
+  of its stage in both sort directions and keeps its run number. The plugin saves it as `pin: true`
+  in `.openspec.yaml`. You can pin only in the focused worktree.
   You can open any change. Apply works only on changes of the focused worktree.
 - **Apply.** Pick an agent terminal and press Apply on a Ready or In progress change. The plugin types
   `/opsx:apply <change>` (Claude Code) or `/opsx-apply <change>` (other agents) into that terminal,

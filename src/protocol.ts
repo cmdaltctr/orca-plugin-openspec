@@ -12,7 +12,9 @@ export interface ChangeRow {
   /** Run order in its worktree, from 1. */
   order: number
   /** True when the order was set by hand (`order:` in .openspec.yaml); false when it comes from "Depends on". */
-  pinned: boolean
+  manual: boolean
+  /** True when `pin: true` is in .openspec.yaml: the card stays at the top of its stage. */
+  pin: boolean
   stage: ChangeStage
   artefacts: Count
   tasks: Count
@@ -59,6 +61,11 @@ declare module 'orca' {
     /** Sets the run order of a change in the focused workspace by hand; null goes back to "Depends on". */
     'change.order': {
       input: ChangeRef & { order: number | null }
+      output: { ok: boolean; message: string }
+    }
+    /** Pins a change of the focused workspace to the top of its stage, or unpins it. */
+    'change.pin': {
+      input: ChangeRef & { pin: boolean }
       output: { ok: boolean; message: string }
     }
     /** Types the apply command into an agent terminal of the focused workspace. With `task`, asks for that one unticked task only. */

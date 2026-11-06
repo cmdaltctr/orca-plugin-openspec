@@ -381,26 +381,47 @@ async function setOrder(view: WorkspaceView, change: ChangeRow, value: string): 
   }
 }
 
+async function setPin(view: WorkspaceView, change: ChangeRow): Promise<void> {
+  try {
+    const result = await plugin.request('change.pin', { workspaceId: view.workspaceId, changeName: change.name, pin: !change.pin }, REQUEST)
+    set(notice, result.message)
+    await load()
+  } catch (error) {
+    set(notice, error instanceof Error ? error.message : String(error))
+  }
+}
+
 /** The run number on the top right. In the focused worktree, pressing it opens a menu to set the number by hand. */
 function OrderControl({ view, change, cardKey }: { view: WorkspaceView; change: ChangeRow; cardKey: string }) {
-  const how = change.pinned ? 'Set by hand' : 'From Depends on in proposal.md, then by creation date'
+  const how = change.manual ? 'Set by hand' : 'From Depends on in proposal.md, then by creation date'
   const count = view.changes?.length ?? 1
   return (
     <Stack gap="xs" align="end">
-      <Button
-        variant={change.pinned ? 'outline' : 'ghost'}
-        size="xs"
-        tooltip={view.focused ? `Run order. ${how}. Press to change.` : `Run order. ${how}. Focus this worktree to change it.`}
-        disabled={!view.focused}
-        onPress={() => set(orderOpen, read(orderOpen) === cardKey ? '' : cardKey)}
-      >
-        {`#${change.order}`}
-      </Button>
+      <Row gap="xs" align="center">
+        <IconButton
+          icon="star"
+          label={`${change.pin ? 'Unpin' : 'Pin'} ${change.name}`}
+          tooltip={view.focused ? (change.pin ? 'Pinned to the top of its stage. Press to unpin.' : 'Pin to the top of its stage') : 'Focus this worktree to pin or unpin'}
+          variant={change.pin ? 'outline' : 'ghost'}
+          size="xs"
+          disabled={!view.focused}
+          onPress={() => void setPin(view, change)}
+        />
+        <Button
+          variant={change.manual ? 'outline' : 'ghost'}
+          size="xs"
+          tooltip={view.focused ? `Run order. ${how}. Press to change.` : `Run order. ${how}. Focus this worktree to change it.`}
+          disabled={!view.focused}
+          onPress={() => set(orderOpen, read(orderOpen) === cardKey ? '' : cardKey)}
+        >
+          {`#${change.order}`}
+        </Button>
+      </Row>
       {read(orderOpen) === cardKey ? (
         <Select
           label={`Run order for ${change.name}`}
           labelHidden
-          value={change.pinned ? String(change.order) : 'auto'}
+          value={change.manual ? String(change.order) : 'auto'}
           options={[
             { value: 'auto', label: 'Auto (Depends on)' },
             ...Array.from({ length: Math.max(count, change.order) }, (_, i) => ({ value: String(i + 1), label: `#${i + 1}` }))
@@ -470,7 +491,9 @@ function StageSections({ entries, showWorktree }: { entries: Entry[]; showWorktr
       {SECTIONS.map(({ stage, title }) => {
         const down = read(descending).includes(stage)
         const sorted = entries.filter(({ change }) => change.stage === stage).sort(byOrder)
-        const inStage = down ? sorted.reverse() : sorted
+        const ordered = down ? [...sorted].reverse() : sorted
+        // Pinned cards stay on top in both directions, in run order among themselves.
+        const inStage = [...sorted.filter((e) => e.change.pin), ...ordered.filter((e) => !e.change.pin)]
         const flip = () => set(descending, down ? read(descending).filter((s) => s !== stage) : [...read(descending), stage])
         return (
           <Stack key={stage} gap="xs">

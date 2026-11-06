@@ -57,8 +57,8 @@ test('readChanges reads each change, skips the archive and plain files', async (
     [`${ROOT}/README.md`]: ''
   })
   assert.deepEqual(await readChanges(files, '/repo'), [
-    { name: 'alpha', stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 1, total: 2 }, order: 1, pinned: false },
-    { name: 'beta', stage: 'planning', artefacts: { done: 1, total: 4 }, tasks: { done: 0, total: 0 }, order: 2, pinned: false }
+    { name: 'alpha', stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 1, total: 2 }, order: 1, manual: false, pin: false },
+    { name: 'beta', stage: 'planning', artefacts: { done: 1, total: 4 }, tasks: { done: 0, total: 0 }, order: 2, manual: false, pin: false }
   ])
 })
 
@@ -70,7 +70,7 @@ test('readChanges lists changes in run order: Depends on, and a hand-set order',
     [`${ROOT}/gamma/.openspec.yaml`]: 'schema: spec-driven\norder: 1\n'
   })
   const rows = (await readChanges(files, '/repo')) ?? []
-  assert.deepEqual(rows.map((r) => [r.name, r.order, r.pinned]), [['gamma', 1, true], ['beta', 2, false], ['alpha', 3, false]])
+  assert.deepEqual(rows.map((r) => [r.name, r.order, r.manual]), [['gamma', 1, true], ['beta', 2, false], ['alpha', 3, false]])
 })
 
 test('readChanges answers null when the workspace has no openspec/changes', async () => {

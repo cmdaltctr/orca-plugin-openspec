@@ -136,15 +136,28 @@ test('lists, reads and saves files of a listed change, only in the focused workt
 test('change.order saves a hand-set number in .openspec.yaml, only in the focused worktree', async () => {
   const worker = await mount(focus('v3', 'omrs-v3'))
   const first = await worker.request('changes.get')
-  assert.deepEqual(first.views[0]?.changes?.map((c) => [c.name, c.order, c.pinned]), [['alpha', 1, false]])
+  assert.deepEqual(first.views[0]?.changes?.map((c) => [c.name, c.order, c.manual]), [['alpha', 1, false]])
   const yaml = '/p/omrs-v3/openspec/changes/alpha/.openspec.yaml'
   assert.equal((await worker.request('change.order', { workspaceId: 'w-v3', changeName: 'alpha', order: 4 })).ok, true)
   assert.equal(written[yaml], 'order: 4\n')
-  assert.deepEqual((await worker.request('changes.get')).views[0]?.changes?.map((c) => [c.order, c.pinned]), [[4, true]])
+  assert.deepEqual((await worker.request('changes.get')).views[0]?.changes?.map((c) => [c.order, c.manual]), [[4, true]])
   assert.equal((await worker.request('change.order', { workspaceId: 'w-v3', changeName: 'alpha', order: null })).ok, true)
   assert.equal(written[yaml], '')
   assert.equal((await worker.request('change.order', { workspaceId: 'w-main', changeName: 'main-only', order: 1 })).ok, false)
   assert.equal((await worker.request('change.order', { workspaceId: 'w-v3', changeName: 'alpha', order: 0 })).ok, false)
+  await worker.deactivate()
+})
+
+test('change.pin saves pin: true in .openspec.yaml, only in the focused worktree', async () => {
+  const worker = await mount(focus('v3', 'omrs-v3'))
+  await worker.request('changes.get')
+  const yaml = '/p/omrs-v3/openspec/changes/alpha/.openspec.yaml'
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-v3', changeName: 'alpha', pin: true })).ok, true)
+  assert.equal(written[yaml], 'pin: true\n')
+  assert.equal((await worker.request('changes.get')).views[0]?.changes?.[0]?.pin, true)
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-v3', changeName: 'alpha', pin: false })).ok, true)
+  assert.equal(written[yaml], '')
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-main', changeName: 'main-only', pin: true })).ok, false)
   await worker.deactivate()
 })
 

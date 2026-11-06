@@ -12,9 +12,9 @@ const snapshot: ChangesSnapshot = {
       branch: 'v3',
       focused: true,
       changes: [
-        { name: 'ready-one', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 10 } },
-        { name: 'busy-one', order: 2, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 5, total: 24 } },
-        { name: 'done-one', order: 3, pinned: false, stage: 'complete', artefacts: { done: 4, total: 4 }, tasks: { done: 3, total: 3 } }
+        { name: 'ready-one', order: 1, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 10 } },
+        { name: 'busy-one', order: 2, manual: false, pin: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 5, total: 24 } },
+        { name: 'done-one', order: 3, manual: false, pin: false, stage: 'complete', artefacts: { done: 4, total: 4 }, tasks: { done: 3, total: 3 } }
       ]
     },
     { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
@@ -72,11 +72,11 @@ test('each stage has a sort toggle that flips the run order of its cards', async
     views: [
       {
         workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true,
-        changes: [{ name: 'fourth', order: 4, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
+        changes: [{ name: 'fourth', order: 4, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
       },
       {
         workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false,
-        changes: [{ name: 'first', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
+        changes: [{ name: 'first', order: 1, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
       }
     ]
   }
@@ -92,6 +92,47 @@ test('each stage has a sort toggle that flips the run order of its cards', async
   await view.unmount()
 })
 
+test('a pinned card stays at the top of its stage in both sort directions, and the pin button toggles it', async () => {
+  const pins: { changeName: string; pin: boolean }[] = []
+  const snap: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [
+      {
+        workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true,
+        changes: [
+          { name: 'first', order: 1, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
+          { name: 'middle', order: 2, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
+          { name: 'stuck', order: 3, manual: false, pin: true, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }
+        ]
+      },
+      { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
+    ]
+  }
+  const h = mockHost({
+    requests: {
+      'changes.get': () => snap,
+      'change.pin': (input) => {
+        pins.push(input)
+        return { ok: true, message: 'Pinned' }
+      }
+    },
+    results: { 'agents.list': () => ({ agents: [] }) }
+  })
+  const view = await mount(panel, { host: h })
+  const at = (name: string) => JSON.stringify(view.tree()).indexOf(`"${name}"`)
+  assert.ok(at('stuck') < at('first') && at('first') < at('middle'))
+  await view.press({ text: 'Run order ↑' })
+  assert.ok(at('stuck') < at('middle') && at('middle') < at('first'))
+  assert.ok(view.find({ text: '#3' }))
+  await view.press({ label: 'Unpin stuck' })
+  await view.press({ label: 'Pin first' })
+  assert.deepEqual(pins, [
+    { workspaceId: 'w-v3', changeName: 'stuck', pin: false },
+    { workspaceId: 'w-v3', changeName: 'first', pin: true }
+  ])
+  await view.unmount()
+})
+
 test('the This worktree tab has the run numbers and the sort toggle too', async () => {
   const one: ChangesSnapshot = {
     checkedAt: 1,
@@ -99,8 +140,8 @@ test('the This worktree tab has the run numbers and the sort toggle too', async 
       {
         workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true,
         changes: [
-          { name: 'second', order: 2, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
-          { name: 'first', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }
+          { name: 'second', order: 2, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
+          { name: 'first', order: 1, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }
         ]
       },
       { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
@@ -165,7 +206,7 @@ test('in a sibling worktree the Todo buttons stay visible but disabled, with the
         folder: 'omrs-v3',
         branch: 'v3',
         focused: false,
-        changes: [{ name: 'busy-one', order: 4, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 23, total: 24 } }]
+        changes: [{ name: 'busy-one', order: 4, manual: false, pin: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 23, total: 24 } }]
       }
     ]
   }
@@ -222,7 +263,7 @@ test('the All worktrees tab lists the changes of every sibling, each tagged with
         folder: 'omrs-v3-dir',
         branch: 'v3',
         focused: true,
-        changes: [{ name: 'here-one', order: 5, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 2 } }]
+        changes: [{ name: 'here-one', order: 5, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 2 } }]
       },
       {
         workspaceId: 'w-feat',
@@ -230,7 +271,7 @@ test('the All worktrees tab lists the changes of every sibling, each tagged with
         folder: 'omrs-feat-x-dir',
         branch: 'feat/x',
         focused: false,
-        changes: [{ name: 'there-one', order: 6, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 1, total: 3 } }]
+        changes: [{ name: 'there-one', order: 6, manual: false, pin: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 1, total: 3 } }]
       },
       { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: null }
     ]
