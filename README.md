@@ -31,9 +31,14 @@ When a change is ready, press Apply to send it to a running agent terminal.
   hand-set number has an outlined button.
 - **Sort.** Each stage with two or more cards has a "Run order ↑" button next to its count.
   Press it to show the highest number first ("Run order ↓"). Press again for #1 first.
-- **Pin.** Press the star next to the run number to pin a change. A pinned change stays at the top
-  of its stage in both sort directions and keeps its run number. The plugin saves it as `pin: true`
-  in `.openspec.yaml`. You can pin only in the focused worktree.
+- **Pin.** Press the star next to the run number to pin a change. A pinned change moves to the
+  Pinned section above every stage. Pinned cards keep their run number, sort #1 first, and show
+  their stage. The plugin saves it as `pin: true`
+  in `.openspec.yaml` of the worktree that holds the change. You can pin a change in any listed
+  worktree, also from the All worktrees tab.
+- **Search and filter.** Type in "Search changes" to show only the cards whose change name contains the text. On the All worktrees tab, use "Show worktree" to show one
+  worktree only. On both tabs, use "Show stage" to show only Planning, Ready, In progress or
+  Complete. Pinned cards stay at the top of the filtered list.
   You can open any change. Apply works only on changes of the focused worktree.
 - **Apply.** Pick an agent terminal and press Apply on a Ready or In progress change. The plugin types
   `/opsx:apply <change>` (Claude Code) or `/opsx-apply <change>` (other agents) into that terminal,

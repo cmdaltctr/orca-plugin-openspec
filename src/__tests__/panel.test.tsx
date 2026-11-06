@@ -21,6 +21,10 @@ const snapshot: ChangesSnapshot = {
   ]
 }
 
+/** The tree as text without menus, so a stage name in Show stage does not count as a heading. */
+const boardText = (tree: unknown): string =>
+  JSON.stringify(tree, (_key, value) => (value && typeof value === 'object' && value.type === 'Select' ? undefined : value))
+
 const applied: { task?: string }[] = []
 
 const host = () =>
@@ -92,7 +96,7 @@ test('each stage has a sort toggle that flips the run order of its cards', async
   await view.unmount()
 })
 
-test('a pinned card stays at the top of its stage in both sort directions, and the pin button toggles it', async () => {
+test('pinned cards sit in a Pinned section above every stage, and the pin button toggles them', async () => {
   const pins: { changeName: string; pin: boolean }[] = []
   const snap: ChangesSnapshot = {
     checkedAt: 1,
@@ -102,7 +106,8 @@ test('a pinned card stays at the top of its stage in both sort directions, and t
         changes: [
           { name: 'first', order: 1, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
           { name: 'middle', order: 2, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
-          { name: 'stuck', order: 3, manual: false, pin: true, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }
+          { name: 'stuck', order: 3, manual: false, pin: true, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
+          { name: 'later', order: 4, manual: false, pin: true, stage: 'planning', artefacts: { done: 1, total: 4 }, tasks: { done: 0, total: 0 } }
         ]
       },
       { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
@@ -119,10 +124,26 @@ test('a pinned card stays at the top of its stage in both sort directions, and t
     results: { 'agents.list': () => ({ agents: [] }) }
   })
   const view = await mount(panel, { host: h })
-  const at = (name: string) => JSON.stringify(view.tree()).indexOf(`"${name}"`)
-  assert.ok(at('stuck') < at('first') && at('first') < at('middle'))
+  const at = (name: string) => boardText(view.tree()).indexOf(`"${name}"`)
+  // Pinned first (in run order, with their stage named), then the stages without them.
+  assert.ok(at('Pinned') < at('stuck') && at('stuck') < at('later') && at('later') < at('Planning'))
+  assert.ok(at('Stage: In progress') > at('Pinned') && at('Stage: In progress') < at('Planning'))
+  assert.ok(at('Planning') < at('first') && at('first') < at('middle'))
+  // A pinned card shows once: the stages count only the cards left in them.
+  const count = (name: string) => boardText(view.tree()).split(`"${name}"`).length - 1
+  assert.equal(count('stuck'), count('first'))
+  assert.equal(count('Pinned'), 1)
+  // Pinned cards have a green outline; the others keep the plain card.
+  const outlined: string[] = []
+  walk(view.tree(), (n) => {
+    if (n.type === 'Box' && n.props?.border === 'success') outlined.push(JSON.stringify(n))
+  })
+  // Two nested green borders per pinned card make the outline thicker.
+  assert.equal(outlined.length, 4)
+  assert.ok(outlined.some((o) => o.includes('"stuck"')) && outlined.some((o) => o.includes('"later"')))
+  assert.equal(outlined.some((o) => o.includes('"first"')), false)
   await view.press({ text: 'Run order ↑' })
-  assert.ok(at('stuck') < at('middle') && at('middle') < at('first'))
+  assert.ok(at('stuck') < at('later') && at('middle') < at('first'))
   assert.ok(view.find({ text: '#3' }))
   await view.press({ label: 'Unpin stuck' })
   await view.press({ label: 'Pin first' })
@@ -130,6 +151,58 @@ test('a pinned card stays at the top of its stage in both sort directions, and t
     { workspaceId: 'w-v3', changeName: 'stuck', pin: false },
     { workspaceId: 'w-v3', changeName: 'first', pin: true }
   ])
+  await view.unmount()
+})
+
+test('All worktrees can show one worktree, search by name, and pin a sibling card', async () => {
+  const pins: { workspaceId: string; changeName: string; pin: boolean }[] = []
+  const row = (name: string, order: number) =>
+    ({ name, order, manual: false, pin: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }) as const
+  const snap: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [
+      { workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true, changes: [row('add-login', 1), row('fix-cache', 2)] },
+      { workspaceId: 'w-feat', name: 'feat/x', folder: 'omrs-feat-x', branch: 'feat/x', focused: false, changes: [row('add-export', 1)] }
+    ]
+  }
+  const h = mockHost({
+    requests: {
+      'changes.get': () => snap,
+      'change.pin': (input) => {
+        pins.push(input)
+        return { ok: true, message: 'Pinned' }
+      }
+    },
+    results: { 'agents.list': () => ({ agents: [] }) }
+  })
+  const view = await mount(panel, { host: h })
+  await view.select({ label: 'Board scope' }, 'all')
+  const shown = (name: string) => boardText(view.tree()).includes(`"${name}"`)
+  assert.ok(shown('add-login') && shown('add-export'))
+  await view.select({ label: 'Show worktree' }, 'w-feat')
+  assert.ok(shown('add-export'))
+  assert.equal(shown('add-login') || shown('fix-cache'), false)
+  await view.select({ label: 'Show worktree' }, 'every')
+  await view.type({ label: 'Search changes' }, 'ADD-')
+  assert.ok(shown('add-login') && shown('add-export'))
+  assert.equal(shown('fix-cache'), false)
+  // Search looks at change names only: a worktree folder name matches nothing.
+  await view.type({ label: 'Search changes' }, 'feat-x', { replace: true })
+  assert.equal(shown('add-export'), false)
+  await view.type({ label: 'Search changes' }, 'add-export', { replace: true })
+  // A sibling card can be pinned here.
+  await view.press({ label: 'Pin add-export' })
+  assert.deepEqual(pins, [{ workspaceId: 'w-feat', changeName: 'add-export', pin: true }])
+  assert.deepEqual(view.errors, [])
+  await view.type({ label: 'Search changes' }, '', { replace: true })
+  // Show stage keeps one stage and hides the other stage headings.
+  await view.select({ label: 'Show stage' }, 'planning')
+  assert.equal(shown('add-login') || shown('Ready'), false)
+  assert.ok(shown('Planning'))
+  await view.select({ label: 'Show stage' }, 'ready')
+  assert.ok(shown('add-login') && shown('Ready'))
+  assert.equal(shown('Planning'), false)
+  await view.select({ label: 'Show stage' }, 'every')
   await view.unmount()
 })
 
@@ -154,6 +227,10 @@ test('the This worktree tab has the run numbers and the sort toggle too', async 
   assert.ok(at('first') < at('second'))
   await view.press({ text: 'Run order ↑' })
   assert.ok(at('second') < at('first'))
+  await view.type({ label: 'Search changes' }, 'sec')
+  assert.ok(at('second') >= 0 && at('first') < 0)
+  assert.ok(view.find({ text: 'Showing 1 of 2 changes' }))
+  await view.type({ label: 'Search changes' }, '')
   await view.unmount()
 })
 

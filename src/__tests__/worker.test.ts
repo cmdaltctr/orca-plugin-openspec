@@ -148,7 +148,7 @@ test('change.order saves a hand-set number in .openspec.yaml, only in the focuse
   await worker.deactivate()
 })
 
-test('change.pin saves pin: true in .openspec.yaml, only in the focused worktree', async () => {
+test('change.pin saves pin: true in .openspec.yaml, in any listed worktree', async () => {
   const worker = await mount(focus('v3', 'omrs-v3'))
   await worker.request('changes.get')
   const yaml = '/p/omrs-v3/openspec/changes/alpha/.openspec.yaml'
@@ -157,7 +157,12 @@ test('change.pin saves pin: true in .openspec.yaml, only in the focused worktree
   assert.equal((await worker.request('changes.get')).views[0]?.changes?.[0]?.pin, true)
   assert.equal((await worker.request('change.pin', { workspaceId: 'w-v3', changeName: 'alpha', pin: false })).ok, true)
   assert.equal(written[yaml], '')
-  assert.equal((await worker.request('change.pin', { workspaceId: 'w-main', changeName: 'main-only', pin: true })).ok, false)
+  // A sibling worktree can be pinned from the All worktrees tab.
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-main', changeName: 'main-only', pin: true })).ok, true)
+  assert.equal(written['/p/omrs/openspec/changes/main-only/.openspec.yaml'], 'pin: true\n')
+  // A change the last look did not list is refused.
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-other', changeName: 'secret', pin: true })).ok, false)
+  assert.equal((await worker.request('change.pin', { workspaceId: 'w-main', changeName: 'nope', pin: true })).ok, false)
   await worker.deactivate()
 })
 

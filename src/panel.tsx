@@ -10,6 +10,7 @@ import {
   Heading,
   host,
   IconButton,
+  Input,
   Markdown,
   on,
   plugin,
@@ -401,10 +402,9 @@ function OrderControl({ view, change, cardKey }: { view: WorkspaceView; change: 
         <IconButton
           icon="star"
           label={`${change.pin ? 'Unpin' : 'Pin'} ${change.name}`}
-          tooltip={view.focused ? (change.pin ? 'Pinned to the top of its stage. Press to unpin.' : 'Pin to the top of its stage') : 'Focus this worktree to pin or unpin'}
+          tooltip={change.pin ? 'Pinned to the top of its stage. Press to unpin.' : 'Pin to the top of its stage'}
           variant={change.pin ? 'outline' : 'ghost'}
           size="xs"
-          disabled={!view.focused}
           onPress={() => void setPin(view, change)}
         />
         <Button
@@ -437,8 +437,7 @@ function ChangeCard({ view, change, showWorktree }: { view: WorkspaceView; chang
   const { artefacts, tasks } = change
   const cardKey = `${view.workspaceId}/${change.name}`
   // The card draws its own header so the name, worktree line and run number sit close together.
-  return (
-    <Card>
+  const body = (
       <Stack gap="md">
         <Row justify="between" align="start">
           <Stack gap="none">
@@ -466,7 +465,17 @@ function ChangeCard({ view, change, showWorktree }: { view: WorkspaceView; chang
           {canApply(view, change) ? <ApplyButton view={view} change={change} /> : null}
         </Row>
       </Stack>
-    </Card>
+  )
+  // Card takes no colour, so a pinned card is a Box with a green border instead.
+  // Box has no border width, so two nested borders with no gap draw a thicker line.
+  return change.pin ? (
+    <Box border="success" radius="lg" padding="none">
+      <Box border="success" radius="lg" padding="md" background="card">
+        {body}
+      </Box>
+    </Box>
+  ) : (
+    <Card>{body}</Card>
   )
 }
 
@@ -478,6 +487,46 @@ interface Entry {
 const entriesOf = (views: WorkspaceView[]): Entry[] =>
   views.flatMap((view) => (view.changes ?? []).map((change) => ({ view, change })))
 
+/** Search text; a card shows when its change name holds it, in any case. Show worktree picks the worktree. */
+const query = atom('')
+/** Workspace id the All worktrees tab shows; EVERY shows them all. */
+const EVERY = 'every'
+const worktreeShown = atom(EVERY)
+
+function matches({ change }: Entry, text: string): boolean {
+  return change.name.toLowerCase().includes(text.trim().toLowerCase())
+}
+
+/** Stage both tabs show; EVERY shows them all. */
+const stageShown = atom(EVERY)
+
+const stageMatches = (entry: Entry): boolean => read(stageShown) === EVERY || entry.change.stage === read(stageShown)
+
+function SearchBox() {
+  return (
+    <Stack gap="sm">
+      <Select
+        label="Show stage"
+        value={read(stageShown)}
+        options={[{ value: EVERY, label: 'All stages' }, ...SECTIONS.map(({ stage, title }) => ({ value: stage, label: title }))]}
+        onChange={(value) => set(stageShown, value)}
+      />
+      <SearchInput />
+    </Stack>
+  )
+}
+
+function SearchInput() {
+  return (
+    <Input label="Search changes" labelHidden placeholder="Search changes" value={read(query)} onChange={(value) => set(query, value)} />
+  )
+}
+
+/** "Showing 2 of 9 changes" while a search or worktree filter hides some; null when every card shows. */
+function FilterNote({ shown, total }: { shown: number; total: number }) {
+  return shown === total ? null : <Text muted size="xs">{`Showing ${shown} of ${total} changes`}</Text>
+}
+
 /** Stages sorted from the highest run number down; any stage not listed sorts from #1 up. */
 const descending = atom<string[]>([])
 
@@ -486,14 +535,28 @@ const byOrder = (a: Entry, b: Entry): number =>
   a.change.order - b.change.order || Number(b.view.focused) - Number(a.view.focused) || a.change.name.localeCompare(b.change.name)
 
 function StageSections({ entries, showWorktree }: { entries: Entry[]; showWorktree?: boolean }) {
+  // Pinned cards leave their stage and sit above every stage, in run order, each with its stage named.
+  const pinned = entries.filter((e) => e.change.pin).sort(byOrder)
   return (
     <Stack gap="md">
-      {SECTIONS.map(({ stage, title }) => {
+      {pinned.length > 0 ? (
+        <Stack gap="xs">
+          <Row gap="xs" align="center">
+            <Text>Pinned</Text>
+            <Badge tone="neutral">{String(pinned.length)}</Badge>
+          </Row>
+          {pinned.map(({ view, change }) => (
+            <Stack key={`${view.workspaceId}/${change.name}`} gap="xs">
+              <Text muted size="xs">{`Stage: ${SECTIONS.find((s) => s.stage === change.stage)?.title ?? change.stage}`}</Text>
+              <ChangeCard view={view} change={change} showWorktree={showWorktree} />
+            </Stack>
+          ))}
+        </Stack>
+      ) : null}
+      {SECTIONS.filter(({ stage }) => read(stageShown) === EVERY || stage === read(stageShown)).map(({ stage, title }) => {
         const down = read(descending).includes(stage)
-        const sorted = entries.filter(({ change }) => change.stage === stage).sort(byOrder)
-        const ordered = down ? [...sorted].reverse() : sorted
-        // Pinned cards stay on top in both directions, in run order among themselves.
-        const inStage = [...sorted.filter((e) => e.change.pin), ...ordered.filter((e) => !e.change.pin)]
+        const sorted = entries.filter(({ change }) => change.stage === stage && !change.pin).sort(byOrder)
+        const inStage = down ? [...sorted].reverse() : sorted
         const flip = () => set(descending, down ? read(descending).filter((s) => s !== stage) : [...read(descending), stage])
         return (
           <Stack key={stage} gap="xs">
@@ -523,7 +586,15 @@ function Board({ view }: { view: WorkspaceView }) {
       <EmptyState icon="info" title="No OpenSpec here" description="This workspace has no openspec/changes folder." />
     )
   }
-  return <StageSections entries={entriesOf([view])} />
+  const all = entriesOf([view])
+  const entries = all.filter((entry) => stageMatches(entry) && matches(entry, read(query)))
+  return (
+    <Stack gap="sm">
+      <SearchBox />
+      <FilterNote shown={entries.length} total={all.length} />
+      <StageSections entries={entries} />
+    </Stack>
+  )
 }
 
 function summary(entries: Entry[], where = ''): string {
@@ -534,11 +605,25 @@ function summary(entries: Entry[], where = ''): string {
 
 /** Every change of the focused worktree and its siblings on one board. Apply still works only on the focused one. */
 function AllBoard({ views }: { views: WorkspaceView[] }) {
-  const entries = entriesOf(views)
+  const all = entriesOf(views)
+  // A worktree that has gone since it was picked falls back to every worktree.
+  const only = views.some((v) => v.workspaceId === read(worktreeShown)) ? read(worktreeShown) : EVERY
+  const entries = all.filter((entry) => (only === EVERY || entry.view.workspaceId === only) && stageMatches(entry) && matches(entry, read(query)))
   return (
     <Stack gap="sm">
-      <Text muted size="xs">{summary(entries, ` in ${views.length} worktrees`)}</Text>
+      <Text muted size="xs">{summary(all, ` in ${views.length} worktrees`)}</Text>
       <Text muted size="xs">Changes in sibling worktrees are read only. Switch to the worktree in Orca to apply one.</Text>
+      <Select
+        label="Show worktree"
+        value={only}
+        options={[
+          { value: EVERY, label: 'All worktrees' },
+          ...views.map((v) => ({ value: v.workspaceId, label: v.focused ? `${v.folder} (this worktree)` : v.folder }))
+        ]}
+        onChange={(value) => set(worktreeShown, value)}
+      />
+      <SearchBox />
+      <FilterNote shown={entries.length} total={all.length} />
       <StageSections entries={entries} showWorktree />
     </Stack>
   )

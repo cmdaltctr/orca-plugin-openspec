@@ -63,7 +63,7 @@ declare module 'orca' {
       input: ChangeRef & { order: number | null }
       output: { ok: boolean; message: string }
     }
-    /** Pins a change of the focused workspace to the top of its stage, or unpins it. */
+    /** Pins a listed change, in the focused workspace or a sibling, to the top of its stage, or unpins it. */
     'change.pin': {
       input: ChangeRef & { pin: boolean }
       output: { ok: boolean; message: string }

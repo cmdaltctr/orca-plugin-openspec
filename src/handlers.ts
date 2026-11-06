@@ -159,9 +159,10 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
   })
 
   orca.panels.handle('change.pin', async ({ workspaceId, changeName, pin }) => {
+    // Any worktree the last look listed: pins only sort the board, so siblings can be pinned from All worktrees.
     const view = last?.views.find((v) => v.workspaceId === workspaceId)
-    if (!view?.focused || !view.changes?.some((c) => c.name === changeName)) {
-      return { ok: false, message: 'Pins can be set only in the focused worktree' }
+    if (!view?.changes?.some((c) => c.name === changeName)) {
+      return { ok: false, message: 'That change cannot be pinned from here' }
     }
     const file = `${paths.get(workspaceId)}/openspec/changes/${changeName}/.openspec.yaml`
     try {
