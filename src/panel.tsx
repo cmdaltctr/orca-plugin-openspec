@@ -39,6 +39,8 @@ const agentOptions = atom<{ value: string; label: string }[]>([])
 const agentChoice = atom('')
 /** Workspace id of the view on show; '' follows the focused workspace. */
 const viewChoice = atom('')
+/** 'here' shows one worktree; 'all' shows the changes of the focused worktree and every sibling together. */
+const scope = atom('here')
 
 const SECTIONS: { stage: ChangeStage; title: string }[] = [
   { stage: 'planning', title: 'Planning' },
@@ -335,6 +337,8 @@ export function setup(ctx: PanelContext): void {
       set(viewChoice, '')
       closeFiles()
       void load()
+      // Orca lists only the focused workspace's agents, so a new focus means a new list.
+      void loadAgents()
     }),
     on('agent.status.changed', () => void loadAgents()),
     { dispose: () => clearInterval(timer) }
@@ -343,21 +347,97 @@ export function setup(ctx: PanelContext): void {
 
 const percent = (done: number, total: number): number => (total === 0 ? 0 : Math.round((done / total) * 100))
 
-function ChangeCard({ view, change }: { view: WorkspaceView; change: ChangeRow }) {
-  const { artefacts, tasks } = change
+/** Key (`workspaceId/change`) of the one card whose branch is shown; '' for none. */
+const branchShown = atom('')
+
+/** Worktree icon, folder name, and an info button that shows the branch on hover and on press. Wraps when narrow. */
+function WorktreeLine({ view, cardKey }: { view: WorkspaceView; cardKey: string }) {
+  const branch = view.branch ?? 'no branch'
+  const toggle = () => set(branchShown, read(branchShown) === cardKey ? '' : cardKey)
   return (
-    <Card title={change.name}>
-      <Stack gap="xs">
-        <Text muted size="xs">{`${artefacts.done} of ${artefacts.total} artefacts`}</Text>
-        <Progress
-          label={`${change.name}: ${tasks.done} of ${tasks.total} tasks complete`}
+    <Stack gap="xs">
+      <Row gap="xs" align="center" wrap>
+        <IconButton icon="branch" label={`Worktree ${view.folder}`} tooltip="Worktree" variant="ghost" size="xs" onPress={toggle} />
+        <Text muted size="xs">{view.focused ? `${view.folder} (this worktree)` : view.folder}</Text>
+        <IconButton icon="info" label={`Branch of ${view.folder}`} tooltip={`Branch: ${branch}`} variant="ghost" size="xs" onPress={toggle} />
+      </Row>
+      {read(branchShown) === cardKey ? <Text muted size="xs">{`Branch: ${branch}`}</Text> : null}
+    </Stack>
+  )
+}
+
+/** Key (`workspaceId/change`) of the one card whose run-order menu is open; '' for none. */
+const orderOpen = atom('')
+
+async function setOrder(view: WorkspaceView, change: ChangeRow, value: string): Promise<void> {
+  set(orderOpen, '')
+  try {
+    const order = value === 'auto' ? null : Number(value)
+    const result = await plugin.request('change.order', { workspaceId: view.workspaceId, changeName: change.name, order }, REQUEST)
+    set(notice, result.message)
+    await load()
+  } catch (error) {
+    set(notice, error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** The run number on the top right. In the focused worktree, pressing it opens a menu to set the number by hand. */
+function OrderControl({ view, change, cardKey }: { view: WorkspaceView; change: ChangeRow; cardKey: string }) {
+  const how = change.pinned ? 'Set by hand' : 'From Depends on in proposal.md, then by creation date'
+  const count = view.changes?.length ?? 1
+  return (
+    <Stack gap="xs" align="end">
+      <Button
+        variant={change.pinned ? 'outline' : 'ghost'}
+        size="xs"
+        tooltip={view.focused ? `Run order. ${how}. Press to change.` : `Run order. ${how}. Focus this worktree to change it.`}
+        disabled={!view.focused}
+        onPress={() => set(orderOpen, read(orderOpen) === cardKey ? '' : cardKey)}
+      >
+        {`#${change.order}`}
+      </Button>
+      {read(orderOpen) === cardKey ? (
+        <Select
+          label={`Run order for ${change.name}`}
           labelHidden
-          value={percent(tasks.done, tasks.total)}
+          value={change.pinned ? String(change.order) : 'auto'}
+          options={[
+            { value: 'auto', label: 'Auto (Depends on)' },
+            ...Array.from({ length: Math.max(count, change.order) }, (_, i) => ({ value: String(i + 1), label: `#${i + 1}` }))
+          ]}
+          onChange={(value) => void setOrder(view, change, value)}
         />
-        <Row justify="between" align="center">
-          <Text muted size="xs">{`${tasks.done} of ${tasks.total} tasks complete`}</Text>
-          <Text muted size="xs">{`${percent(tasks.done, tasks.total)}%`}</Text>
+      ) : null}
+    </Stack>
+  )
+}
+
+function ChangeCard({ view, change, showWorktree }: { view: WorkspaceView; change: ChangeRow; showWorktree?: boolean }) {
+  const { artefacts, tasks } = change
+  const cardKey = `${view.workspaceId}/${change.name}`
+  // The card draws its own header so the name, worktree line and run number sit close together.
+  return (
+    <Card>
+      <Stack gap="md">
+        <Row justify="between" align="start">
+          <Stack gap="none">
+            <Text weight="semibold">{change.name}</Text>
+            {showWorktree ? <WorktreeLine view={view} cardKey={cardKey} /> : null}
+          </Stack>
+          <OrderControl view={view} change={change} cardKey={cardKey} />
         </Row>
+        <Box border radius="md" padding="sm" direction="column" gap="xs">
+          <Text muted size="xs">{`${artefacts.done} of ${artefacts.total} artefacts`}</Text>
+          <Progress
+            label={`${change.name}: ${tasks.done} of ${tasks.total} tasks complete`}
+            labelHidden
+            value={percent(tasks.done, tasks.total)}
+          />
+          <Row justify="between" align="center">
+            <Text muted size="xs">{`${tasks.done} of ${tasks.total} tasks complete`}</Text>
+            <Text muted size="xs">{`${percent(tasks.done, tasks.total)}%`}</Text>
+          </Row>
+        </Box>
         <Row gap="xs">
           <Button variant="outline" icon="file-text" onPress={() => void openFiles(view, change)}>
             Open
@@ -369,26 +449,43 @@ function ChangeCard({ view, change }: { view: WorkspaceView; change: ChangeRow }
   )
 }
 
-function Board({ view }: { view: WorkspaceView }) {
-  if (view.changes === null) {
-    return (
-      <EmptyState icon="info" title="No OpenSpec here" description="This workspace has no openspec/changes folder." />
-    )
-  }
-  const changes = view.changes
+interface Entry {
+  view: WorkspaceView
+  change: ChangeRow
+}
+
+const entriesOf = (views: WorkspaceView[]): Entry[] =>
+  views.flatMap((view) => (view.changes ?? []).map((change) => ({ view, change })))
+
+/** Stages sorted from the highest run number down; any stage not listed sorts from #1 up. */
+const descending = atom<string[]>([])
+
+/** By run number; equal numbers put the focused worktree first, then go by name. */
+const byOrder = (a: Entry, b: Entry): number =>
+  a.change.order - b.change.order || Number(b.view.focused) - Number(a.view.focused) || a.change.name.localeCompare(b.change.name)
+
+function StageSections({ entries, showWorktree }: { entries: Entry[]; showWorktree?: boolean }) {
   return (
     <Stack gap="md">
       {SECTIONS.map(({ stage, title }) => {
-        const inStage = changes.filter((change) => change.stage === stage)
+        const down = read(descending).includes(stage)
+        const sorted = entries.filter(({ change }) => change.stage === stage).sort(byOrder)
+        const inStage = down ? sorted.reverse() : sorted
+        const flip = () => set(descending, down ? read(descending).filter((s) => s !== stage) : [...read(descending), stage])
         return (
           <Stack key={stage} gap="xs">
             <Row gap="xs" align="center">
               <Text>{title}</Text>
               <Badge tone="neutral">{String(inStage.length)}</Badge>
+              {inStage.length > 1 ? (
+                <Button variant="ghost" size="xs" tooltip={down ? 'Highest run number first. Press for #1 first.' : '#1 first. Press for highest first.'} onPress={flip}>
+                  {down ? 'Run order ↓' : 'Run order ↑'}
+                </Button>
+              ) : null}
             </Row>
             {inStage.length === 0 ? <Text muted size="xs">No changes here</Text> : null}
-            {inStage.map((change) => (
-              <ChangeCard key={change.name} view={view} change={change} />
+            {inStage.map(({ view, change }) => (
+              <ChangeCard key={`${view.workspaceId}/${change.name}`} view={view} change={change} showWorktree={showWorktree} />
             ))}
           </Stack>
         )
@@ -397,11 +494,31 @@ function Board({ view }: { view: WorkspaceView }) {
   )
 }
 
-function summary(view: WorkspaceView): string {
-  const changes = view.changes ?? []
-  const done = changes.reduce((sum, change) => sum + change.tasks.done, 0)
-  const total = changes.reduce((sum, change) => sum + change.tasks.total, 0)
-  return `${changes.length} changes · ${done} of ${total} tasks complete`
+function Board({ view }: { view: WorkspaceView }) {
+  if (view.changes === null) {
+    return (
+      <EmptyState icon="info" title="No OpenSpec here" description="This workspace has no openspec/changes folder." />
+    )
+  }
+  return <StageSections entries={entriesOf([view])} />
+}
+
+function summary(entries: Entry[], where = ''): string {
+  const done = entries.reduce((sum, { change }) => sum + change.tasks.done, 0)
+  const total = entries.reduce((sum, { change }) => sum + change.tasks.total, 0)
+  return `${entries.length} changes${where} · ${done} of ${total} tasks complete`
+}
+
+/** Every change of the focused worktree and its siblings on one board. Apply still works only on the focused one. */
+function AllBoard({ views }: { views: WorkspaceView[] }) {
+  const entries = entriesOf(views)
+  return (
+    <Stack gap="sm">
+      <Text muted size="xs">{summary(entries, ` in ${views.length} worktrees`)}</Text>
+      <Text muted size="xs">Changes in sibling worktrees are read only. Switch to the worktree in Orca to apply one.</Text>
+      <StageSections entries={entries} showWorktree />
+    </Stack>
+  )
 }
 
 export default function Panel() {
@@ -432,6 +549,27 @@ export default function Panel() {
       {current?.problem ? <EmptyState icon="info" title="No project to show" description={current.problem} /> : null}
       {read(notice) ? <Text muted>{read(notice)}</Text> : null}
       {views.length > 1 ? (
+        <Tabs label="Board scope" value={read(scope)} onChange={(value) => set(scope, value)}>
+          <Tab value="here" label="This worktree" />
+          <Tab value="all" label="All worktrees" />
+        </Tabs>
+      ) : null}
+      {views.length > 1 && read(scope) === 'all' ? (
+        <>
+          <AgentSelect />
+          <AllBoard views={views} />
+        </>
+      ) : (
+        <ScopedBoard current={current} views={views} view={view} />
+      )}
+    </Stack>
+  )
+}
+
+function ScopedBoard({ current, views, view }: { current: ChangesSnapshot | null; views: WorkspaceView[]; view?: WorkspaceView }) {
+  return (
+    <>
+      {views.length > 1 ? (
         <Select
           label="Worktree"
           value={view?.workspaceId ?? ''}
@@ -448,12 +586,12 @@ export default function Panel() {
       ) : null}
       {view ? (
         <Stack gap="sm">
-          <Text muted size="xs">{summary(view)}</Text>
+          <Text muted size="xs">{summary(entriesOf([view]))}</Text>
           <Board view={view} />
         </Stack>
       ) : !current && !read(problem) ? (
         <Spinner label="Reading OpenSpec changes" />
       ) : null}
-    </Stack>
+    </>
   )
 }

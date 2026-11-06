@@ -1,6 +1,7 @@
 // The worker's logic. `register` takes the Io so tests can replace the disk and git.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { listChangeFiles, openTasks, readChanges, type Files } from './change-progress'
+import { writeOrder } from './change-order'
 import type { ChangeRef, ChangesSnapshot, WorkspaceView } from './protocol'
 
 export interface Io extends Files {
@@ -43,6 +44,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return {
       workspaceId: workspace.id,
       name: workspace.name,
+      folder: workspace.path.split(/[\\/]/).filter(Boolean).pop() ?? workspace.name,
       branch: workspace.branch,
       focused,
       changes: await readChanges(io, workspace.path)
@@ -135,6 +137,25 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     // Ticked tasks change the progress, so look again; the panel reloads the snapshot after a save.
     last = await look()
     return { ok: true, message: `Saved ${ref.path}` }
+  })
+
+  orca.panels.handle('change.order', async ({ workspaceId, changeName, order }) => {
+    const view = last?.views.find((v) => v.workspaceId === workspaceId)
+    const listed = view?.changes?.some((c) => c.name === changeName)
+    if (!view?.focused || !listed) {
+      return { ok: false, message: 'Run order can be set only in the focused worktree' }
+    }
+    if (order !== null && (!Number.isInteger(order) || order < 1 || order > 999)) {
+      return { ok: false, message: 'Run order must be a whole number from 1' }
+    }
+    const file = `${paths.get(workspaceId)}/openspec/changes/${changeName}/.openspec.yaml`
+    try {
+      await io.write(file, writeOrder(await io.text(file), order))
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+    last = await look()
+    return { ok: true, message: order === null ? `${changeName} follows Depends on again` : `${changeName} runs #${order}` }
   })
 
   orca.panels.handle('change.apply', async ({ workspaceId, changeName, terminalId, task }) => {

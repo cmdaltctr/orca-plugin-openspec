@@ -8,15 +8,16 @@ const snapshot: ChangesSnapshot = {
     {
       workspaceId: 'w-v3',
       name: 'omrs-v3',
+      folder: 'omrs-v3',
       branch: 'v3',
       focused: true,
       changes: [
-        { name: 'ready-one', stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 10 } },
-        { name: 'busy-one', stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 5, total: 24 } },
-        { name: 'done-one', stage: 'complete', artefacts: { done: 4, total: 4 }, tasks: { done: 3, total: 3 } }
+        { name: 'ready-one', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 10 } },
+        { name: 'busy-one', order: 2, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 5, total: 24 } },
+        { name: 'done-one', order: 3, pinned: false, stage: 'complete', artefacts: { done: 4, total: 4 }, tasks: { done: 3, total: 3 } }
       ]
     },
-    { workspaceId: 'w-main', name: 'omrs', branch: 'main', focused: false, changes: [] }
+    { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
   ]
 }
 
@@ -38,6 +39,82 @@ const host = () =>
       })
     }
   })
+
+test('each card shows its run order, and the number can be set by hand in the focused worktree', async () => {
+  const ordered: { changeName: string; order: number | null }[] = []
+  const h = mockHost({
+    requests: {
+      'changes.get': () => snapshot,
+      'change.order': (input) => {
+        ordered.push(input)
+        return { ok: true, message: 'Saved run order' }
+      }
+    },
+    results: { 'agents.list': () => ({ agents: [] }) }
+  })
+  const view = await mount(panel, { host: h })
+  assert.ok(view.find({ text: '#2' }))
+  assert.equal(JSON.stringify(view.tree()).includes('Run order for busy-one'), false)
+  await view.press({ text: '#2' })
+  await view.select({ label: 'Run order for busy-one' }, '1')
+  assert.deepEqual(ordered, [{ workspaceId: 'w-v3', changeName: 'busy-one', order: 1 }])
+  await view.press({ text: '#2' })
+  await view.select({ label: 'Run order for busy-one' }, 'auto')
+  assert.deepEqual(ordered[1], { workspaceId: 'w-v3', changeName: 'busy-one', order: null })
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+  await view.unmount()
+})
+
+test('each stage has a sort toggle that flips the run order of its cards', async () => {
+  const two: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [
+      {
+        workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true,
+        changes: [{ name: 'fourth', order: 4, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
+      },
+      {
+        workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false,
+        changes: [{ name: 'first', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }]
+      }
+    ]
+  }
+  const h = mockHost({ requests: { 'changes.get': () => two }, results: { 'agents.list': () => ({ agents: [] }) } })
+  const view = await mount(panel, { host: h })
+  await view.select({ label: 'Board scope' }, 'all')
+  const at = (name: string) => JSON.stringify(view.tree()).indexOf(`"${name}"`)
+  // Ascending by default, across worktrees.
+  assert.ok(at('first') < at('fourth'))
+  await view.press({ text: 'Run order ↑' })
+  assert.ok(at('fourth') < at('first'))
+  assert.ok(view.find({ text: 'Run order ↓' }))
+  await view.unmount()
+})
+
+test('the This worktree tab has the run numbers and the sort toggle too', async () => {
+  const one: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [
+      {
+        workspaceId: 'w-v3', name: 'omrs-v3', folder: 'omrs-v3', branch: 'v3', focused: true,
+        changes: [
+          { name: 'second', order: 2, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } },
+          { name: 'first', order: 1, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 1 } }
+        ]
+      },
+      { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: [] }
+    ]
+  }
+  const h = mockHost({ requests: { 'changes.get': () => one }, results: { 'agents.list': () => ({ agents: [] }) } })
+  const view = await mount(panel, { host: h })
+  const at = (name: string) => JSON.stringify(view.tree()).indexOf(`"${name}"`)
+  assert.ok(view.find({ text: '#1' }))
+  assert.ok(at('first') < at('second'))
+  await view.press({ text: 'Run order ↑' })
+  assert.ok(at('second') < at('first'))
+  await view.unmount()
+})
 
 test('shows progress and offers Apply only for ready and in-progress changes', async () => {
   const view = await mount(panel, { host: host() })
@@ -81,13 +158,14 @@ test('in a sibling worktree the Todo buttons stay visible but disabled, with the
   const sibling: ChangesSnapshot = {
     checkedAt: 1,
     views: [
-      { workspaceId: 'w-main', name: 'omrs', branch: 'main', focused: true, changes: [] },
+      { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: true, changes: [] },
       {
         workspaceId: 'w-v3',
         name: 'omrs-v3',
+        folder: 'omrs-v3',
         branch: 'v3',
         focused: false,
-        changes: [{ name: 'busy-one', stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 23, total: 24 } }]
+        changes: [{ name: 'busy-one', order: 4, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 23, total: 24 } }]
       }
     ]
   }
@@ -111,6 +189,78 @@ test('in a sibling worktree the Todo buttons stay visible but disabled, with the
   const playButtons = shown.match(/"icon":"play","disabled":(true|false)/g) ?? []
   assert.ok(playButtons.length >= 2)
   assert.ok(playButtons.every((b) => b.endsWith('true')))
+  await view.unmount()
+})
+
+test('switching worktree reloads the agent list for the new worktree', async () => {
+  let agents = [{ terminalId: 'old', title: 'old worktree agent', agent: 'claude', state: 'done', stateStartedAt: 1 }]
+  const h = mockHost({
+    requests: { 'changes.get': () => snapshot },
+    results: { 'agents.list': () => ({ agents }) }
+  })
+  const view = await mount(panel, { host: h })
+  assert.ok(JSON.stringify(view.tree()).includes('old worktree agent'))
+  agents = [
+    { terminalId: 'a', title: 'v3 agent one', agent: 'claude', state: 'working', stateStartedAt: 1 },
+    { terminalId: 'b', title: 'v3 agent two', agent: 'claude', state: 'waiting', stateStartedAt: 1 }
+  ]
+  await view.emit('workspace.changed', {})
+  const shown = JSON.stringify(view.tree())
+  assert.ok(shown.includes('v3 agent one'))
+  assert.ok(shown.includes('v3 agent two'))
+  assert.equal(shown.includes('old worktree agent'), false)
+  await view.unmount()
+})
+
+test('the All worktrees tab lists the changes of every sibling, each tagged with its worktree', async () => {
+  const many: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [
+      {
+        workspaceId: 'w-v3',
+        name: 'omrs-v3',
+        folder: 'omrs-v3-dir',
+        branch: 'v3',
+        focused: true,
+        changes: [{ name: 'here-one', order: 5, pinned: false, stage: 'ready', artefacts: { done: 4, total: 4 }, tasks: { done: 0, total: 2 } }]
+      },
+      {
+        workspaceId: 'w-feat',
+        name: 'omrs-feat-x',
+        folder: 'omrs-feat-x-dir',
+        branch: 'feat/x',
+        focused: false,
+        changes: [{ name: 'there-one', order: 6, pinned: false, stage: 'in-progress', artefacts: { done: 4, total: 4 }, tasks: { done: 1, total: 3 } }]
+      },
+      { workspaceId: 'w-main', name: 'omrs', folder: 'omrs', branch: 'main', focused: false, changes: null }
+    ]
+  }
+  const h = mockHost({
+    requests: { 'changes.get': () => many },
+    results: { 'agents.list': () => ({ agents: [{ terminalId: 't1', title: 'claude', agent: 'claude', state: 'waiting', stateStartedAt: 1 }] }) }
+  })
+  const view = await mount(panel, { host: h })
+  // The default tab shows the focused worktree only.
+  assert.equal(view.find({ text: 'there-one' }), null)
+  await view.select({ label: 'Board scope' }, 'all')
+  assert.ok(view.find({ text: '2 changes in 3 worktrees · 1 of 5 tasks complete' }))
+  assert.ok(view.find({ text: 'here-one' }))
+  assert.ok(view.find({ text: 'there-one' }))
+  // Each card names its worktree folder only; the branch hides behind the info button.
+  assert.ok(view.find({ text: 'omrs-v3-dir (this worktree)' }))
+  assert.ok(view.find({ text: 'omrs-feat-x-dir' }))
+  assert.equal(view.find({ text: 'Branch: feat/x' }), null)
+  await view.press({ label: 'Branch of omrs-feat-x-dir' })
+  assert.ok(view.find({ text: 'Branch: feat/x' }))
+  // Artefacts, bar and task count sit together in their own bordered box.
+  const boxes: string[] = []
+  walk(view.tree(), (n) => {
+    if (n.type === 'Box' && (n.props as { border?: unknown } | undefined)?.border) boxes.push(JSON.stringify(n))
+  })
+  assert.ok(boxes.some((box) => box.includes('4 of 4 artefacts') && box.includes('1 of 3 tasks complete')))
+  // Apply stays on the focused worktree's change only.
+  assert.equal(view.findAll({ text: 'Apply' }).length, 1)
+  assert.deepEqual(view.errors, [])
   await view.unmount()
 })
 

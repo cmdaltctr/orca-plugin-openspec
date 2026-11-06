@@ -9,6 +9,19 @@ A board of the OpenSpec changes in the workspace you are looking at. Each change
 - **Sibling worktrees.** Other worktrees of the same Git repository (for example `v3` and its
   `feat/*` worktrees) appear in the Worktree menu as read-only views. The check is the shared
   Git common directory, so a worktree of a different repository is never listed.
+- **All worktrees tab.** When siblings exist, the "All worktrees" tab shows the changes of the focused
+  worktree and every sibling on one board. Under each change name is its worktree folder. Hover
+  the info button to see the branch, or press it to show the branch under the line.
+- **Run order.** Each card shows its run number on the top right, counted within its worktree.
+  A number you set by hand wins. To set it, press the number in the focused worktree and pick
+  one. The plugin saves it as `order: N` in the change's `.openspec.yaml`. Pick "Auto" to remove
+  it. Every other change comes after the changes named in backticks on its `Depends on:` line or
+  in its `## Dependency` section of `proposal.md`. Ties go by the `created:` date. Hand-set
+  numbers are used as they are, and the other changes take the numbers that are free. A
+  hand-set number has an outlined button.
+- **Sort.** Each stage with two or more cards has a "Run order ↑" button next to its count.
+  Press it to show the highest number first ("Run order ↓"). Press again for #1 first.
+  You can open any change. Apply works only on changes of the focused worktree.
 - **Apply.** Pick an agent terminal and press Apply on a Ready or In progress change. The plugin types
   `/opsx:apply <change>` (Claude Code) or `/opsx-apply <change>` (other agents) into that terminal,
   followed by one line that asks the agent to use the `omms:omms-memory` skill. Apply is available on

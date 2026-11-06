@@ -9,6 +9,10 @@ export interface Count {
 /** One folder under openspec/changes (never the archive). */
 export interface ChangeRow {
   name: string
+  /** Run order in its worktree, from 1. */
+  order: number
+  /** True when the order was set by hand (`order:` in .openspec.yaml); false when it comes from "Depends on". */
+  pinned: boolean
   stage: ChangeStage
   artefacts: Count
   tasks: Count
@@ -18,6 +22,8 @@ export interface ChangeRow {
 export interface WorkspaceView {
   workspaceId: string
   name: string
+  /** Last part of the worktree's path, for example `omrs-feat-x`. Orca often names a worktree after its branch. */
+  folder: string
   branch: string | null
   focused: boolean
   /** null when the workspace has no openspec/changes folder. */
@@ -48,6 +54,11 @@ declare module 'orca' {
     /** Saves a file of a change in the focused workspace. Sibling worktrees are read only. */
     'file.write': {
       input: ChangeRef & { path: string; text: string }
+      output: { ok: boolean; message: string }
+    }
+    /** Sets the run order of a change in the focused workspace by hand; null goes back to "Depends on". */
+    'change.order': {
+      input: ChangeRef & { order: number | null }
       output: { ok: boolean; message: string }
     }
     /** Types the apply command into an agent terminal of the focused workspace. With `task`, asks for that one unticked task only. */
