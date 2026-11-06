@@ -1,7 +1,17 @@
 # OpenSpec for Orca
 
-A board of the OpenSpec changes in the workspace you are looking at. Each change shows its stage
-(Planning, Ready, In progress, Complete), its artefacts (of 4) and its task progress.
+An Orca panel for projects that use [OpenSpec](https://github.com/Fission-AI/OpenSpec). It reads the
+`openspec/changes/*` folders in your workspace and shows each change on a board. Each change shows its
+stage (Planning, Ready, In progress, Complete), its artefacts (of 4) and its task progress.
+
+Use it to see what is planned, what is ready to build and what is done, without leaving Orca.
+When a change is ready, press Apply to send it to a running agent terminal.
+
+## Install
+
+1. In Orca, install the plugin from the plugin directory, or from this repository's Git URL.
+2. Open the **OpenSpec** panel.
+3. Approve the access it asks for: read the workspace, read the agent list and send text to a terminal.
 
 ## What it shows
 
