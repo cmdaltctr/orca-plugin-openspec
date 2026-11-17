@@ -42,10 +42,10 @@ const io: Io = {
   }
 }
 
-const focus = (branch: string, displayName: string) =>
+const focus = (branch: string, displayName: string, workspaceId?: string) =>
   mockHost({
     results: {
-      'workspace.readContext': () => ({ branch, displayName, terminals: [] }),
+      'workspace.readContext': () => ({ workspaceId, branch, displayName, terminals: [] }),
       'workspace.list': () => ({ workspaces: WORKSPACES, truncated: false }),
       'agents.list': () => ({
         agents: [{ terminalId: 't1', title: 'claude', agent: 'claude', state: 'waiting', stateStartedAt: 1 }]
@@ -88,6 +88,29 @@ test('says so when two workspaces share the focused branch and name', async () =
   assert.match(snapshot.problem ?? '', /Several workspaces/)
   await worker.deactivate()
   await ambiguous.deactivate()
+})
+
+test('picks the focused workspace by id when several share the branch and name', async () => {
+  const DUPLICATES = [
+    { id: 'w-main', kind: 'worktree', name: 'main', path: '/p/one', branch: 'main', hostId: 'local' },
+    { id: 'w-main2', kind: 'worktree', name: 'main', path: '/p/two', branch: 'main', hostId: 'local' }
+  ]
+  const host = mockHost({
+    results: {
+      'workspace.readContext': () => ({ workspaceId: 'w-main', branch: 'main', displayName: 'main', terminals: [] }),
+      'workspace.list': () => ({ workspaces: DUPLICATES, truncated: false })
+    }
+  })
+  const worker = await mount(host)
+  const snapshot = await worker.request('changes.get')
+  assert.equal(snapshot.problem, undefined)
+  assert.deepEqual(snapshot.views.map((v) => [v.workspaceId, v.focused]), [['w-main', true]])
+  // An id Orca no longer lists falls back to branch and name.
+  const stale = await mount(focus('main', 'omrs', 'w-gone'))
+  const fallback = await stale.request('changes.get')
+  assert.equal(fallback.views[0]?.workspaceId, 'w-main')
+  await worker.deactivate()
+  await stale.deactivate()
 })
 
 test('apply types the command only for a ready or in-progress change of the focused view', async () => {

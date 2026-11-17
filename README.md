@@ -71,8 +71,6 @@ run the `openspec` CLI.
 - Local workspaces only. Remote (SSH or WSL) workspaces show a message.
 - Orca's plugin API does not expose parent and child worktree links, so a child worktree appears as a
   sibling. A future host API field (`parentWorkspaceId` on `workspace.list`) would allow a child view.
-- Orca identifies the focused workspace by branch and name. If two workspaces share both, the
-  panel says it cannot tell which is focused.
 
 ## Develop
 
