@@ -257,7 +257,7 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
         {view.focused ? <AgentSelect /> : null}
         {left.length === 0 ? <Text muted size="xs">No tasks left.</Text> : null}
         {left.map((task, index) => (
-          <Stack key={`${index}-${task.text}`} gap="xs">
+          <Stack key={`${index}-${task.text.slice(0, 40)}`} gap="xs">
             {task.section !== null && task.section !== left[index - 1]?.section ? <Text weight="semibold">{task.section}</Text> : null}
             <Card>
               <Stack gap="xs">

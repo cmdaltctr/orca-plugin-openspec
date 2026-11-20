@@ -305,6 +305,26 @@ test('the Todo tab shows each unticked task as a card with its own Apply', async
   await view.unmount()
 })
 
+test('the Todo tab shows a task longer than the 1024-character key limit', async () => {
+  // Orca refuses a key over 1024 characters, so a long task used as a key left the tab on its spinner.
+  const long = `6.10 ${'word '.repeat(300)}`.trim()
+  const h = mockHost({
+    requests: {
+      'file.list': () => ({ files: ['tasks.md'] }),
+      'file.read': () => ({ text: `- [ ] ${long}` }),
+      'changes.get': () => snapshot
+    },
+    results: { 'agents.list': () => ({ agents: [] }) }
+  })
+  const view = await mount(panel, { host: h })
+  await view.press({ text: 'Open' })
+  await view.select({ label: 'ready-one files' }, 'todo')
+  assert.deepEqual(view.errors, [])
+  assert.ok(view.find({ text: 'Apply all' }))
+  assert.ok(JSON.stringify(view.tree()).includes(`"content":"${long}"`))
+  await view.unmount()
+})
+
 test('in a sibling worktree the Todo buttons stay visible but disabled, with the reason', async () => {
   const sibling: ChangesSnapshot = {
     checkedAt: 1,
