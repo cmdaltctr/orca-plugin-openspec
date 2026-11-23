@@ -588,3 +588,21 @@ test('a long archive shows five names, then all of them on Show all', async () =
   assert.equal(view.find({ text: names[5] }), null)
   await view.unmount()
 })
+
+test('a project with no OpenSpec at all says so, with no empty Archive or Specs lists', async () => {
+  const plain: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: [] }, true), changes: null }] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => plain }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.ok(JSON.stringify(view.tree()).includes('No OpenSpec here'))
+  assert.equal(view.find({ text: 'Archive' }), null)
+  assert.equal(view.find({ text: 'Specs' }), null)
+  await view.unmount()
+})
+
+test('a project with main specs but no openspec/changes shows the empty stages and its Specs', async () => {
+  const specsOnly: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: ['auth'] }, true), changes: null }] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => specsOnly }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.equal(JSON.stringify(view.tree()).includes('No OpenSpec here'), false)
+  assert.ok(view.find({ text: 'Planning' }))
+  assert.ok(view.find({ text: 'auth' }))
+  await view.unmount()
+})

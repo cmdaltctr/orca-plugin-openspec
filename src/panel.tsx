@@ -596,8 +596,12 @@ function StageSections({ entries, showWorktree }: { entries: Entry[]; showWorktr
   )
 }
 
+/** True when the workspace holds any OpenSpec: a changes folder, an archived change or a main spec. */
+const hasOpenSpec = (view: WorkspaceView): boolean =>
+  view.changes !== null || (view.library?.archive.length ?? 0) + (view.library?.specs.length ?? 0) > 0
+
 function Board({ view }: { view: WorkspaceView }) {
-  if (view.changes === null) {
+  if (!hasOpenSpec(view)) {
     return (
       <EmptyState icon="info" title="No OpenSpec here" description="This workspace has no openspec/changes folder." />
     )
@@ -699,7 +703,7 @@ function ViewBody({ view }: { view: WorkspaceView }) {
         <Text muted size="xs">{summary(entriesOf([view]))}</Text>
         <Board view={view} />
       </Stack>
-      {hasChanges ? null : <Library view={view} />}
+      {hasChanges || !hasOpenSpec(view) ? null : <Library view={view} />}
     </Stack>
   )
 }
