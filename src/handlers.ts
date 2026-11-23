@@ -1,6 +1,6 @@
 // The worker's logic. `register` takes the Io so tests can replace the disk and git.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { AREA_ROOT, isFolderName, listChangeFiles, openTasks, readChanges, readLibrary, type Files } from './change-progress'
+import { AREA_ROOT, isFolder, listChangeFiles, openTasks, readChanges, readLibrary, type Files } from './change-progress'
 import { writeOrder, writePin } from './change-order'
 import type { ChangeRef, ChangesSnapshot, WorkspaceView } from './protocol'
 
@@ -65,11 +65,11 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
       return null
     }
     const root = `${workspacePath}/${AREA_ROOT[ref.area ?? 'changes']}`
-    // Live changes are the ones the look listed; the archive and specs are read from disk, and only a real folder name passes.
+    // Live changes are the ones the look listed; the archive and specs are read from disk, and only a real folder of the area passes.
     const listed =
       ref.area === undefined || ref.area === 'changes'
         ? view.changes?.some((c) => c.name === ref.changeName)
-        : ((await io.list(root)) ?? []).filter(isFolderName).includes(ref.changeName)
+        : ((await io.list(root)) ?? []).includes(ref.changeName) && (await isFolder(io, root, ref.changeName))
     return listed ? `${root}/${ref.changeName}` : null
   }
 

@@ -97,8 +97,10 @@ export const AREA_ROOT: Record<ChangeArea, string> = {
   specs: 'openspec/specs'
 }
 
-/** Folder names only: no dot folders and no stray markdown files such as README.md. */
-export const isFolderName = (name: string): boolean => !name.startsWith('.') && !name.endsWith('.md')
+/** True when `name`, inside `dir`, is a real folder and not a dot name. A plain file such as notes.txt lists as null. */
+export async function isFolder(files: Files, dir: string, name: string): Promise<boolean> {
+  return !name.startsWith('.') && (await files.list(`${dir}/${name}`)) !== null
+}
 
 /** The markdown files of a folder, relative to it. A main spec has `spec.md` only; a change has proposal, design, tasks, then each spec. */
 export async function listChangeFiles(files: Files, dir: string, area: ChangeArea = 'changes'): Promise<string[]> {
@@ -121,8 +123,12 @@ export async function listChangeFiles(files: Files, dir: string, area: ChangeAre
 
 /** The archived changes (newest first, as their names start with the date) and the main specs of a workspace. */
 export async function readLibrary(files: Files, workspacePath: string): Promise<Library> {
-  const names = async (area: ChangeArea): Promise<string[]> =>
-    ((await files.list(`${workspacePath}/${AREA_ROOT[area]}`)) ?? []).filter(isFolderName).sort()
+  const names = async (area: ChangeArea): Promise<string[]> => {
+    const dir = `${workspacePath}/${AREA_ROOT[area]}`
+    const all = (await files.list(dir)) ?? []
+    const folder = await Promise.all(all.map((name) => isFolder(files, dir, name)))
+    return all.filter((_, i) => folder[i]).sort()
+  }
   return { archive: (await names('archive')).reverse(), specs: await names('specs') }
 }
 
