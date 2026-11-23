@@ -40,7 +40,7 @@ const agentOptions = atom<{ value: string; label: string }[]>([])
 const agentChoice = atom('')
 /** Workspace id of the view on show; '' follows the focused workspace. */
 const viewChoice = atom('')
-/** 'here' shows one worktree; 'all' shows the changes of the focused worktree and every sibling together. */
+/** 'here' shows one worktree; 'all' shows every worktree together; 'archive' and 'specs' list that worktree's archived changes and main specs. */
 const scope = atom('here')
 
 const SECTIONS: { stage: ChangeStage; title: string }[] = [
@@ -654,23 +654,38 @@ const LIBRARY_PREVIEW = 5
 /** Keys (`workspaceId/area`) of the lists that show every name. */
 const listsExpanded = atom<string[]>([])
 
+/** Search text of the Archive and Specs tabs, one per tab. */
+const libraryQuery = atom<Record<string, string>>({})
+
 function LibrarySection({ title, area, view, names }: { title: string; area: ChangeArea; view: WorkspaceView; names: string[] }) {
   const key = `${view.workspaceId}/${area}`
-  const expanded = read(listsExpanded).includes(key)
+  const typed = read(libraryQuery)[area] ?? ''
+  const text = typed.trim().toLowerCase()
+  const found = text ? names.filter((name) => name.toLowerCase().includes(text)) : names
+  // A search shows every match; otherwise five names, then "Show all".
+  const expanded = text !== '' || read(listsExpanded).includes(key)
   const toggle = () => set(listsExpanded, expanded ? read(listsExpanded).filter((k) => k !== key) : [...read(listsExpanded), key])
   return (
     <Stack gap="xs">
+      <Input
+        label={`Search ${title.toLowerCase()}`}
+        labelHidden
+        placeholder={`Search ${title.toLowerCase()}`}
+        value={typed}
+        onChange={(value) => set(libraryQuery, { ...read(libraryQuery), [area]: value })}
+      />
+      {text ? <Text muted size="xs">{`Showing ${found.length} of ${names.length}`}</Text> : null}
       <Row gap="xs" align="center">
         <Text>{title}</Text>
         <Badge tone="neutral">{String(names.length)}</Badge>
-        {names.length > LIBRARY_PREVIEW ? (
+        {!text && names.length > LIBRARY_PREVIEW ? (
           <Button variant="ghost" size="xs" onPress={toggle}>
             {expanded ? 'Show fewer' : `Show all ${names.length}`}
           </Button>
         ) : null}
       </Row>
       {names.length === 0 ? <Text muted size="xs">{`No ${title.toLowerCase()} here`}</Text> : null}
-      {(expanded ? names : names.slice(0, LIBRARY_PREVIEW)).map((name) => (
+      {(expanded ? found : found.slice(0, LIBRARY_PREVIEW)).map((name) => (
         <Card key={name}>
           <Row justify="between" align="center">
             <Text weight="semibold">{name}</Text>
@@ -684,26 +699,12 @@ function LibrarySection({ title, area, view, names }: { title: string; area: Cha
   )
 }
 
-/** The archived changes and the main specs of one workspace. Both are read only. */
-function Library({ view }: { view: WorkspaceView }) {
-  return (
-    <Stack gap="md">
-      <LibrarySection title="Archive" area="archive" view={view} names={view.library?.archive ?? []} />
-      <LibrarySection title="Specs" area="specs" view={view} names={view.library?.specs ?? []} />
-    </Stack>
-  )
-}
-
-/** The board of one workspace. With no active change, the Archive and Specs list below the empty stages. */
+/** The board of one workspace. */
 function ViewBody({ view }: { view: WorkspaceView }) {
-  const hasChanges = (view.changes?.length ?? 0) > 0
   return (
-    <Stack gap="md">
-      <Stack gap="sm">
-        <Text muted size="xs">{summary(entriesOf([view]))}</Text>
-        <Board view={view} />
-      </Stack>
-      {hasChanges || !hasOpenSpec(view) ? null : <Library view={view} />}
+    <Stack gap="sm">
+      <Text muted size="xs">{summary(entriesOf([view]))}</Text>
+      <Board view={view} />
     </Stack>
   )
 }
@@ -722,6 +723,13 @@ export default function Panel() {
       </Stack>
     )
   }
+  // A tab that is gone (no siblings, or no OpenSpec in this worktree) falls back to the board.
+  const tabs = [
+    { value: 'here', label: 'This worktree' },
+    ...(views.length > 1 ? [{ value: 'all', label: 'All worktrees' }] : []),
+    ...(view && hasOpenSpec(view) ? [{ value: 'archive', label: 'Archive' }, { value: 'specs', label: 'Specs' }] : [])
+  ]
+  const shown = tabs.some((tab) => tab.value === read(scope)) ? read(scope) : 'here'
   const openView = open ? views.find((v) => v.workspaceId === open.workspaceId) : undefined
   const openRow = openView?.changes?.find((c) => c.name === open?.changeName)
   if (open && openView && openRow) {
@@ -743,17 +751,20 @@ export default function Panel() {
       {read(problem) ? <Text tone="danger">{read(problem)}</Text> : null}
       {current?.problem ? <EmptyState icon="info" title="No project to show" description={current.problem} /> : null}
       {read(notice) ? <Text muted>{read(notice)}</Text> : null}
-      {views.length > 1 ? (
-        <Tabs label="Board scope" value={read(scope)} onChange={(value) => set(scope, value)}>
-          <Tab value="here" label="This worktree" />
-          <Tab value="all" label="All worktrees" />
+      {tabs.length > 1 ? (
+        <Tabs label="Board scope" value={shown} onChange={(value) => set(scope, value)}>
+          {tabs.map((tab) => (
+            <Tab key={tab.value} value={tab.value} label={tab.label} />
+          ))}
         </Tabs>
       ) : null}
-      {views.length > 1 && read(scope) === 'all' ? (
+      {shown === 'all' ? (
         <>
           <AgentSelect />
           <AllBoard views={views} />
         </>
+      ) : shown === 'archive' || shown === 'specs' ? (
+        <LibraryTab area={shown} views={views} view={view} />
       ) : (
         <ScopedBoard current={current} views={views} view={view} />
       )}
@@ -761,20 +772,42 @@ export default function Panel() {
   )
 }
 
+/** Picks the worktree the board, Archive and Specs tabs show; only when siblings exist. */
+function WorktreeSelect({ views, view }: { views: WorkspaceView[]; view?: WorkspaceView }) {
+  return views.length > 1 ? (
+    <Select
+      label="Worktree"
+      value={view?.workspaceId ?? ''}
+      options={views.map((v) => ({
+        value: v.workspaceId,
+        label: `${v.focused ? 'This worktree' : 'Sibling'}: ${v.name}${v.branch ? ` (${v.branch})` : ''}`
+      }))}
+      onChange={(value) => set(viewChoice, value)}
+    />
+  ) : null
+}
+
+/** The Archive or Specs tab of one worktree. Read only. */
+function LibraryTab({ area, views, view }: { area: 'archive' | 'specs'; views: WorkspaceView[]; view?: WorkspaceView }) {
+  return (
+    <>
+      <WorktreeSelect views={views} view={view} />
+      {view ? (
+        <LibrarySection
+          title={area === 'archive' ? 'Archive' : 'Specs'}
+          area={area}
+          view={view}
+          names={view.library?.[area] ?? []}
+        />
+      ) : null}
+    </>
+  )
+}
+
 function ScopedBoard({ current, views, view }: { current: ChangesSnapshot | null; views: WorkspaceView[]; view?: WorkspaceView }) {
   return (
     <>
-      {views.length > 1 ? (
-        <Select
-          label="Worktree"
-          value={view?.workspaceId ?? ''}
-          options={views.map((v) => ({
-            value: v.workspaceId,
-            label: `${v.focused ? 'This worktree' : 'Sibling'}: ${v.name}${v.branch ? ` (${v.branch})` : ''}`
-          }))}
-          onChange={(value) => set(viewChoice, value)}
-        />
-      ) : null}
+      <WorktreeSelect views={views} view={view} />
       {view?.focused ? <AgentSelect /> : null}
       {view && !view.focused ? (
         <Text muted size="xs">Sibling worktree: read only. Switch to it in Orca to apply a change.</Text>

@@ -39,7 +39,7 @@ export interface WorkspaceView {
   focused: boolean
   /** null when the workspace has no openspec/changes folder. */
   changes: ChangeRow[] | null
-  /** Set when the workspace has no active change. */
+  /** Archived changes and main specs, for the Archive and Specs tabs. */
   library?: Library
 }
 
