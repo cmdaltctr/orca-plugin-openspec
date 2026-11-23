@@ -66,16 +66,25 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return files.includes(path) ? `${workspacePath}/openspec/changes/${ref.changeName}/${path}` : null
   }
 
-  /** The one workspace Orca shows. Branch and name must pick exactly one, or no project is shown. */
-  function pickFocused(workspaces: Workspace[], branch: string, displayName: string): Workspace | string {
-    const byBranch = workspaces.filter((w) => (w.branch ?? '') === branch)
-    const matches = byBranch.length > 1 ? byBranch.filter((w) => w.name === displayName) : byBranch
+  /** The one workspace Orca shows. `workspaceId` wins when Orca names it; otherwise branch and name must pick exactly one, or no project is shown. */
+  function pickFocused(
+    workspaces: Workspace[],
+    context: { workspaceId?: string; branch: string; displayName: string }
+  ): Workspace | string {
+    if (context.workspaceId) {
+      const byId = workspaces.find((w) => w.id === context.workspaceId)
+      if (byId) {
+        return byId
+      }
+    }
+    const byBranch = workspaces.filter((w) => (w.branch ?? '') === context.branch)
+    const matches = byBranch.length > 1 ? byBranch.filter((w) => w.name === context.displayName) : byBranch
     if (matches.length === 1) {
       return matches[0]
     }
     return byBranch.length === 0
       ? 'Orca did not list the focused workspace'
-      : `Several workspaces share the branch "${branch}", so Orca cannot tell which one is focused`
+      : `Several workspaces share the branch "${context.branch}", so Orca cannot tell which one is focused`
   }
 
   async function look(): Promise<ChangesSnapshot> {
@@ -84,7 +93,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
       return { views: [], problem: 'No workspace is focused', checkedAt: Date.now() }
     }
     const { workspaces } = await orca.host.call('workspace.list')
-    const focused = pickFocused(workspaces, context.branch, context.displayName)
+    const focused = pickFocused(workspaces, context)
     if (typeof focused === 'string') {
       return { views: [], problem: focused, checkedAt: Date.now() }
     }
