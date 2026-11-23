@@ -53,11 +53,11 @@ When a change is ready, press Apply to send it to a running agent terminal.
   The buttons always show. When Apply cannot run (sibling worktree, change not Ready or In progress,
   no agent picked) the button is greyed out and its tooltip gives the reason.
   The plugin checks that the task is still an unticked line of `tasks.md` before it types anything.
-- **Archive and Specs.** When a workspace has no active change, two lists show below the empty stages. A project with no OpenSpec
-  at all shows "No OpenSpec here" only.
-  "Archive" holds the folders of `openspec/changes/archive`, newest first. "Specs" holds the folders of
-  `openspec/specs`. Each list shows five names, with "Show all" for the rest. Press Open to read the
-  files in the same viewer as a change. These files are read only: no Edit, no Todo tab, no Apply.
+- **Archive and Specs tabs.** Next to "This worktree" sit two more tabs. "Archive" lists the folders of
+  `openspec/changes/archive`, newest first. "Specs" lists the folders of `openspec/specs`. They show whether
+  or not the worktree has active changes. Each tab has its own search, and shows five names with
+  "Show all" for the rest. Press Open to read the files in the same viewer as a change. These files are
+  read only: no Edit, no Todo tab, no Apply. A project with no OpenSpec at all shows neither tab.
 
 ## Stages
 

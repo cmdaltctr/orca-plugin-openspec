@@ -533,7 +533,32 @@ const emptyView = (library: { archive: string[]; specs: string[] }, focused: boo
   library
 })
 
-test('with no active change, the empty stages stay and the Archive and Specs list below them; a spec opens read only', async () => {
+/** Atoms outlive a test, so each library test goes back to the board tab before it ends. */
+const backToBoard = async (view: { select: (finder: { label: string }, value: string) => Promise<void> }) => {
+  await view.select({ label: 'Board scope' }, 'here')
+}
+
+test('a project with active changes has Archive and Specs tabs; the board itself lists neither', async () => {
+  const busy: ChangesSnapshot = {
+    checkedAt: 1,
+    views: [{ ...snapshot.views[0], library: { archive: ['2026-01-02-old-one'], specs: ['auth'] } }]
+  }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => busy }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.ok(view.find({ text: 'ready-one' }))
+  assert.equal(view.find({ text: '2026-01-02-old-one' }), null)
+  assert.equal(view.find({ text: 'auth' }), null)
+  await view.select({ label: 'Board scope' }, 'archive')
+  assert.ok(view.find({ text: '2026-01-02-old-one' }))
+  assert.equal(view.find({ text: 'ready-one' }), null)
+  await view.select({ label: 'Board scope' }, 'specs')
+  assert.ok(view.find({ text: 'auth' }))
+  assert.equal(view.find({ text: '2026-01-02-old-one' }), null)
+  await backToBoard(view)
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('a spec opens read only from the Specs tab, and Back returns to that tab', async () => {
   const quiet: ChangesSnapshot = { checkedAt: 1, views: [emptyView({ archive: [], specs: ['auth'] }, true)] }
   const requested: { area?: string; changeName: string }[] = []
   const h = mockHost({
@@ -548,20 +573,18 @@ test('with no active change, the empty stages stay and the Archive and Specs lis
     results: { 'agents.list': () => ({ agents: [] }) }
   })
   const view = await mount(panel, { host: h })
-  // The empty stages stay, with the Archive and Specs below them.
+  // The board shows the empty stages only.
   assert.ok(view.find({ text: 'Planning' }))
-  assert.ok(view.find({ text: 'Complete' }))
-  assert.ok(view.find({ text: 'Archive' }))
-  assert.ok(view.find({ text: 'Specs' }))
-  assert.ok(view.find({ text: 'auth' }))
-  assert.ok(view.find({ text: 'No archive here' }))
+  assert.equal(view.find({ text: 'auth' }), null)
+  await view.select({ label: 'Board scope' }, 'specs')
   await view.press({ text: 'Open' })
   assert.deepEqual(requested, [{ workspaceId: 'w-empty', changeName: 'auth', area: 'specs' }])
   assert.ok(JSON.stringify(view.tree()).includes('"content":"# Auth spec"'))
   // Read only: no Edit, no Todo tab.
   assert.equal(view.find({ text: 'Edit' }), null)
   await view.press({ text: 'Back' })
-  assert.ok(view.find({ text: 'Planning' }))
+  assert.ok(view.find({ text: 'auth' }))
+  await backToBoard(view)
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
   await view.unmount()
@@ -576,33 +599,42 @@ test('a problem still says No project to show, with the reason', async () => {
   await view.unmount()
 })
 
-test('a long archive shows five names, then all of them on Show all', async () => {
+test('a long archive shows five names, then all of them on Show all, and search filters them', async () => {
   const names = Array.from({ length: 7 }, (_, i) => `2026-01-0${i + 1}-c${i + 1}`)
   const long: ChangesSnapshot = { checkedAt: 1, views: [emptyView({ archive: names, specs: [] }, true)] }
   const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => long }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  await view.select({ label: 'Board scope' }, 'archive')
   assert.ok(view.find({ text: names[4] }))
   assert.equal(view.find({ text: names[5] }), null)
   await view.press({ text: 'Show all 7' })
   assert.ok(view.find({ text: names[6] }))
   await view.press({ text: 'Show fewer' })
   assert.equal(view.find({ text: names[5] }), null)
+  // Search looks through every name, not only the five shown.
+  await view.type({ label: 'Search archive' }, 'C7')
+  assert.ok(view.find({ text: names[6] }))
+  assert.equal(view.find({ text: names[0] }), null)
+  assert.ok(view.find({ text: 'Showing 1 of 7' }))
+  await view.type({ label: 'Search archive' }, '', { replace: true })
+  await backToBoard(view)
   await view.unmount()
 })
 
-test('a project with no OpenSpec at all says so, with no empty Archive or Specs lists', async () => {
+test('a project with no OpenSpec at all says so, with no Archive or Specs tabs', async () => {
   const plain: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: [] }, true), changes: null }] }
   const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => plain }, results: { 'agents.list': () => ({ agents: [] }) } }) })
   assert.ok(JSON.stringify(view.tree()).includes('No OpenSpec here'))
-  assert.equal(view.find({ text: 'Archive' }), null)
-  assert.equal(view.find({ text: 'Specs' }), null)
+  assert.equal(JSON.stringify(view.tree()).includes('Board scope'), false)
   await view.unmount()
 })
 
-test('a project with main specs but no openspec/changes shows the empty stages and its Specs', async () => {
+test('a project with main specs but no openspec/changes shows the empty stages, and its Specs in their tab', async () => {
   const specsOnly: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: ['auth'] }, true), changes: null }] }
   const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => specsOnly }, results: { 'agents.list': () => ({ agents: [] }) } }) })
   assert.equal(JSON.stringify(view.tree()).includes('No OpenSpec here'), false)
   assert.ok(view.find({ text: 'Planning' }))
+  await view.select({ label: 'Board scope' }, 'specs')
   assert.ok(view.find({ text: 'auth' }))
+  await backToBoard(view)
   await view.unmount()
 })

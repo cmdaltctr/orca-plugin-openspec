@@ -39,7 +39,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
   /** Folder of each workspace the last look listed. The panel never sends a path. */
   const paths = new Map<string, string>()
 
-  /** The library (archive and specs) is read only when no change is active. */
+  /** Every view carries its archive and main specs, so their tabs work with or without active changes. */
   const toView = async (workspace: Workspace, focused: boolean): Promise<WorkspaceView> => {
     paths.set(workspace.id, workspace.path)
     const changes = await readChanges(io, workspace.path)
@@ -50,7 +50,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
       branch: workspace.branch,
       focused,
       changes,
-      ...(!changes?.length ? { library: await readLibrary(io, workspace.path) } : {})
+      library: await readLibrary(io, workspace.path)
     }
   }
 

@@ -122,13 +122,14 @@ test('picks the focused workspace by id when several share the branch and name',
   await stale.deactivate()
 })
 
-test('a workspace with no active change carries its archive and specs; one with changes does not', async () => {
+test('every workspace carries its archive and specs, with or without active changes', async () => {
   const empty = await mount(focus('feat/x', 'omrs-feat-x'))
   const [view] = (await empty.request('changes.get')).views
   assert.deepEqual(view?.changes, [])
   assert.deepEqual(view?.library, { archive: ['2026-02-01-shipped'], specs: ['billing'] })
   const busy = await mount(focus('v3', 'omrs-v3'))
-  assert.equal((await busy.request('changes.get')).views[0]?.library, undefined)
+  assert.deepEqual((await busy.request('changes.get')).views[0]?.library, { archive: [], specs: [] })
+  assert.deepEqual((await busy.request('changes.get')).views[1]?.library, { archive: ['2026-03-04-newer', '2026-01-02-old-one'], specs: ['auth'] })
   await empty.deactivate()
   await busy.deactivate()
 })
