@@ -654,12 +654,13 @@ const LIBRARY_PREVIEW = 5
 /** Keys (`workspaceId/area`) of the lists that show every name. */
 const listsExpanded = atom<string[]>([])
 
-/** Search text of the Archive and Specs tabs. */
-const libraryQuery = atom('')
+/** Search text of the Archive and Specs tabs, one per tab. */
+const libraryQuery = atom<Record<string, string>>({})
 
 function LibrarySection({ title, area, view, names }: { title: string; area: ChangeArea; view: WorkspaceView; names: string[] }) {
   const key = `${view.workspaceId}/${area}`
-  const text = read(libraryQuery).trim().toLowerCase()
+  const typed = read(libraryQuery)[area] ?? ''
+  const text = typed.trim().toLowerCase()
   const found = text ? names.filter((name) => name.toLowerCase().includes(text)) : names
   // A search shows every match; otherwise five names, then "Show all".
   const expanded = text !== '' || read(listsExpanded).includes(key)
@@ -670,8 +671,8 @@ function LibrarySection({ title, area, view, names }: { title: string; area: Cha
         label={`Search ${title.toLowerCase()}`}
         labelHidden
         placeholder={`Search ${title.toLowerCase()}`}
-        value={read(libraryQuery)}
-        onChange={(value) => set(libraryQuery, value)}
+        value={typed}
+        onChange={(value) => set(libraryQuery, { ...read(libraryQuery), [area]: value })}
       />
       {text ? <Text muted size="xs">{`Showing ${found.length} of ${names.length}`}</Text> : null}
       <Row gap="xs" align="center">

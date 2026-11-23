@@ -638,3 +638,19 @@ test('a project with main specs but no openspec/changes shows the empty stages, 
   await backToBoard(view)
   await view.unmount()
 })
+
+test('the Archive and Specs tabs keep their own search text', async () => {
+  const both: ChangesSnapshot = { checkedAt: 1, views: [emptyView({ archive: ['2026-01-02-old-one'], specs: ['auth'] }, true)] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => both }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  await view.select({ label: 'Board scope' }, 'archive')
+  await view.type({ label: 'Search archive' }, 'old')
+  await view.select({ label: 'Board scope' }, 'specs')
+  // The archive search does not hide specs.
+  assert.ok(view.find({ text: 'auth' }))
+  await view.select({ label: 'Board scope' }, 'archive')
+  assert.ok(view.find({ text: '2026-01-02-old-one' }))
+  assert.ok(view.find({ text: 'Showing 1 of 1' }))
+  await view.type({ label: 'Search archive' }, '', { replace: true })
+  await backToBoard(view)
+  await view.unmount()
+})
