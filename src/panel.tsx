@@ -28,7 +28,7 @@ import {
   type PanelContext
 } from 'orca'
 import { openTasks, splitSections } from './change-progress'
-import type { ChangeRef, ChangeRow, ChangesSnapshot, ChangeStage, WorkspaceView } from './protocol'
+import type { ChangeArea, ChangeRef, ChangeRow, ChangesSnapshot, ChangeStage, WorkspaceView } from './protocol'
 
 const POLL_MS = 30_000
 const REQUEST = { timeoutMs: 30_000 }
@@ -114,8 +114,7 @@ async function chooseFile(ref: ChangeRef, path: string): Promise<void> {
   }
 }
 
-async function openFiles(view: WorkspaceView, change: ChangeRow): Promise<void> {
-  const ref = { workspaceId: view.workspaceId, changeName: change.name }
+async function openFiles(ref: ChangeRef): Promise<void> {
   set(openChange, ref)
   set(files, [])
   set(fileChoice, '')
@@ -154,6 +153,9 @@ async function save(ref: ChangeRef): Promise<void> {
 }
 
 const fileLabel = (path: string): string => (path.startsWith('specs/') ? path.split('/')[1] : path.replace(/\.md$/, ''))
+
+/** The archive and the main specs are read only and have no tasks to apply. */
+const isLive = (ref: ChangeRef): boolean => (ref.area ?? 'changes') === 'changes'
 
 const canApply = (view: WorkspaceView, change: ChangeRow): boolean =>
   view.focused && (change.stage === 'ready' || change.stage === 'in-progress')
@@ -239,8 +241,9 @@ function SectionCards({ text }: { text: string }) {
   )
 }
 
-function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) {
-  const ref = { workspaceId: view.workspaceId, changeName: change.name }
+/** `view` and `change` are set for a live change; an archived change or a main spec has neither. */
+function FileView({ target, view, change }: { target: ChangeRef; view?: WorkspaceView; change?: ChangeRow }) {
+  const ref = target
   const choice = read(fileChoice)
   const text = read(fileText)
   const isEditing = read(editing)
@@ -248,7 +251,7 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
   const body =
     text === null ? (
       <Spinner label="Reading file" />
-    ) : choice === TODO ? (
+    ) : choice === TODO && view && change ? (
       <Stack gap="xs">
         <Row justify="between" align="center">
           <Text muted size="xs">{`${change.tasks.total - change.tasks.done} of ${change.tasks.total} tasks left`}</Text>
@@ -284,7 +287,7 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
       </Stack>
     ) : (
       <Stack gap="xs">
-        {view.focused ? (
+        {view?.focused ? (
           <Row justify="end">
             <Button
               variant="ghost"
@@ -304,9 +307,9 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
   return (
     <Stack gap="sm">
       <Row justify="between" align="center">
-        <Heading>{change.name}</Heading>
+        <Heading>{ref.changeName}</Heading>
         <Button variant="outline" onPress={closeFiles}>
-          Back to changes
+          {view ? 'Back to changes' : 'Back'}
         </Button>
       </Row>
       {read(files).length === 0 ? (
@@ -315,8 +318,8 @@ function FileView({ view, change }: { view: WorkspaceView; change: ChangeRow }) 
         <>
           {/* The tabs hold labels only, so the strip scrolls sideways on its own and the body stays put. */}
           <Box scroll="x">
-            <Tabs label={`${change.name} files`} value={choice} onChange={(path) => void chooseFile(ref, path)}>
-              {read(files).flatMap((path) => (path === 'tasks.md' ? [path, TODO] : [path])).map((path) => (
+            <Tabs label={`${ref.changeName} files`} value={choice} onChange={(path) => void chooseFile(ref, path)}>
+              {read(files).flatMap((path) => (path === 'tasks.md' && isLive(ref) ? [path, TODO] : [path])).map((path) => (
                 <Tab key={path} value={path} label={fileLabel(path)} disabled={isEditing && path !== choice} />
               ))}
             </Tabs>
@@ -472,7 +475,7 @@ function ChangeCard({ view, change, showWorktree }: { view: WorkspaceView; chang
           </Row>
         </Box>
         <Row gap="xs">
-          <Button variant="outline" icon="file-text" onPress={() => void openFiles(view, change)}>
+          <Button variant="outline" icon="file-text" onPress={() => void openFiles({ workspaceId: view.workspaceId, changeName: change.name })}>
             Open
           </Button>
           {canApply(view, change) ? <ApplyButton view={view} change={change} /> : null}
@@ -593,8 +596,12 @@ function StageSections({ entries, showWorktree }: { entries: Entry[]; showWorktr
   )
 }
 
+/** True when the workspace holds any OpenSpec: a changes folder, an archived change or a main spec. */
+const hasOpenSpec = (view: WorkspaceView): boolean =>
+  view.changes !== null || (view.library?.archive.length ?? 0) + (view.library?.specs.length ?? 0) > 0
+
 function Board({ view }: { view: WorkspaceView }) {
-  if (view.changes === null) {
+  if (!hasOpenSpec(view)) {
     return (
       <EmptyState icon="info" title="No OpenSpec here" description="This workspace has no openspec/changes folder." />
     )
@@ -642,19 +649,86 @@ function AllBoard({ views }: { views: WorkspaceView[] }) {
   )
 }
 
+/** How many archived changes or specs show before "Show all". */
+const LIBRARY_PREVIEW = 5
+/** Keys (`workspaceId/area`) of the lists that show every name. */
+const listsExpanded = atom<string[]>([])
+
+function LibrarySection({ title, area, view, names }: { title: string; area: ChangeArea; view: WorkspaceView; names: string[] }) {
+  const key = `${view.workspaceId}/${area}`
+  const expanded = read(listsExpanded).includes(key)
+  const toggle = () => set(listsExpanded, expanded ? read(listsExpanded).filter((k) => k !== key) : [...read(listsExpanded), key])
+  return (
+    <Stack gap="xs">
+      <Row gap="xs" align="center">
+        <Text>{title}</Text>
+        <Badge tone="neutral">{String(names.length)}</Badge>
+        {names.length > LIBRARY_PREVIEW ? (
+          <Button variant="ghost" size="xs" onPress={toggle}>
+            {expanded ? 'Show fewer' : `Show all ${names.length}`}
+          </Button>
+        ) : null}
+      </Row>
+      {names.length === 0 ? <Text muted size="xs">{`No ${title.toLowerCase()} here`}</Text> : null}
+      {(expanded ? names : names.slice(0, LIBRARY_PREVIEW)).map((name) => (
+        <Card key={name}>
+          <Row justify="between" align="center">
+            <Text weight="semibold">{name}</Text>
+            <Button variant="outline" icon="file-text" onPress={() => void openFiles({ workspaceId: view.workspaceId, changeName: name, area })}>
+              Open
+            </Button>
+          </Row>
+        </Card>
+      ))}
+    </Stack>
+  )
+}
+
+/** The archived changes and the main specs of one workspace. Both are read only. */
+function Library({ view }: { view: WorkspaceView }) {
+  return (
+    <Stack gap="md">
+      <LibrarySection title="Archive" area="archive" view={view} names={view.library?.archive ?? []} />
+      <LibrarySection title="Specs" area="specs" view={view} names={view.library?.specs ?? []} />
+    </Stack>
+  )
+}
+
+/** The board of one workspace. With no active change, the Archive and Specs list below the empty stages. */
+function ViewBody({ view }: { view: WorkspaceView }) {
+  const hasChanges = (view.changes?.length ?? 0) > 0
+  return (
+    <Stack gap="md">
+      <Stack gap="sm">
+        <Text muted size="xs">{summary(entriesOf([view]))}</Text>
+        <Board view={view} />
+      </Stack>
+      {hasChanges || !hasOpenSpec(view) ? null : <Library view={view} />}
+    </Stack>
+  )
+}
+
 export default function Panel() {
   const current = read(snapshot)
   const views = current?.views ?? []
   const chosen = read(viewChoice)
   const view = views.find((v) => v.workspaceId === chosen) ?? views.find((v) => v.focused) ?? views[0]
   const open = read(openChange)
-  const openView = open ? views.find((v) => v.workspaceId === open.workspaceId) : undefined
-  const openRow = openView?.changes?.find((c) => c.name === open?.changeName)
-  if (openView && openRow) {
+  if (open && !isLive(open)) {
     return (
       <Stack gap="md">
         {read(notice) ? <Text muted>{read(notice)}</Text> : null}
-        <FileView view={openView} change={openRow} />
+        <FileView target={open} />
+      </Stack>
+    )
+  }
+  const openView = open ? views.find((v) => v.workspaceId === open.workspaceId) : undefined
+  const openRow = openView?.changes?.find((c) => c.name === open?.changeName)
+  if (open && openView && openRow) {
+    return (
+      <Stack gap="md">
+        {read(notice) ? <Text muted>{read(notice)}</Text> : null}
+        <FileView target={open} view={openView} change={openRow} />
       </Stack>
     )
   }
@@ -706,10 +780,7 @@ function ScopedBoard({ current, views, view }: { current: ChangesSnapshot | null
         <Text muted size="xs">Sibling worktree: read only. Switch to it in Orca to apply a change.</Text>
       ) : null}
       {view ? (
-        <Stack gap="sm">
-          <Text muted size="xs">{summary(entriesOf([view]))}</Text>
-          <Board view={view} />
-        </Stack>
+        <ViewBody view={view} />
       ) : !current && !read(problem) ? (
         <Spinner label="Reading OpenSpec changes" />
       ) : null}

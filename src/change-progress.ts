@@ -1,7 +1,7 @@
 // Reads openspec/changes from disk and works out each change's stage. All disk access goes
 // through `Files`, so tests can stand in for the file system.
 import { dependsOn, numberChanges, readCreated, readOrder, readPin } from './change-order'
-import type { ChangeRow, ChangeStage, Count } from './protocol'
+import type { ChangeArea, ChangeRow, ChangeStage, Count, Library } from './protocol'
 
 export interface Files {
   /** Names of the folders and files in a folder, or null when it does not exist. */
@@ -90,9 +90,21 @@ async function readChange(files: Files, changesDir: string, name: string): Promi
   return { row: { name, stage: stageOf(artefacts, taskCount), artefacts, tasks: taskCount }, proposal, yaml }
 }
 
-/** The markdown files of a change, relative to its folder: proposal, design, tasks, then each spec. */
-export async function listChangeFiles(files: Files, workspacePath: string, changeName: string): Promise<string[]> {
-  const dir = `${workspacePath}/openspec/changes/${changeName}`
+/** Folder of each area, relative to the workspace. */
+export const AREA_ROOT: Record<ChangeArea, string> = {
+  changes: 'openspec/changes',
+  archive: 'openspec/changes/archive',
+  specs: 'openspec/specs'
+}
+
+/** Folder names only: no dot folders and no stray markdown files such as README.md. */
+export const isFolderName = (name: string): boolean => !name.startsWith('.') && !name.endsWith('.md')
+
+/** The markdown files of a folder, relative to it. A main spec has `spec.md` only; a change has proposal, design, tasks, then each spec. */
+export async function listChangeFiles(files: Files, dir: string, area: ChangeArea = 'changes'): Promise<string[]> {
+  if (area === 'specs') {
+    return (await files.text(`${dir}/spec.md`)) !== null ? ['spec.md'] : []
+  }
   const found: string[] = []
   for (const name of ['proposal.md', 'design.md', 'tasks.md']) {
     if ((await files.text(`${dir}/${name}`)) !== null) {
@@ -105,6 +117,13 @@ export async function listChangeFiles(files: Files, workspacePath: string, chang
     }
   }
   return found
+}
+
+/** The archived changes (newest first, as their names start with the date) and the main specs of a workspace. */
+export async function readLibrary(files: Files, workspacePath: string): Promise<Library> {
+  const names = async (area: ChangeArea): Promise<string[]> =>
+    ((await files.list(`${workspacePath}/${AREA_ROOT[area]}`)) ?? []).filter(isFolderName).sort()
+  return { archive: (await names('archive')).reverse(), specs: await names('specs') }
 }
 
 /** null when the workspace has no openspec/changes folder. Folders only; `archive` is skipped. */

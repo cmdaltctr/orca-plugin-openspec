@@ -522,3 +522,87 @@ test('Open shows the files rendered, and Edit then Save writes the draft', async
   assert.deepEqual(view.refusals, [])
   await view.unmount()
 })
+
+const emptyView = (library: { archive: string[]; specs: string[] }, focused: boolean) => ({
+  workspaceId: 'w-empty',
+  name: 'empty-project',
+  folder: 'empty-project',
+  branch: 'main',
+  focused,
+  changes: [],
+  library
+})
+
+test('with no active change, the empty stages stay and the Archive and Specs list below them; a spec opens read only', async () => {
+  const quiet: ChangesSnapshot = { checkedAt: 1, views: [emptyView({ archive: [], specs: ['auth'] }, true)] }
+  const requested: { area?: string; changeName: string }[] = []
+  const h = mockHost({
+    requests: {
+      'file.list': (ref) => {
+        requested.push(ref)
+        return { files: ['spec.md'] }
+      },
+      'file.read': () => ({ text: '# Auth spec' }),
+      'changes.get': () => quiet
+    },
+    results: { 'agents.list': () => ({ agents: [] }) }
+  })
+  const view = await mount(panel, { host: h })
+  // The empty stages stay, with the Archive and Specs below them.
+  assert.ok(view.find({ text: 'Planning' }))
+  assert.ok(view.find({ text: 'Complete' }))
+  assert.ok(view.find({ text: 'Archive' }))
+  assert.ok(view.find({ text: 'Specs' }))
+  assert.ok(view.find({ text: 'auth' }))
+  assert.ok(view.find({ text: 'No archive here' }))
+  await view.press({ text: 'Open' })
+  assert.deepEqual(requested, [{ workspaceId: 'w-empty', changeName: 'auth', area: 'specs' }])
+  assert.ok(JSON.stringify(view.tree()).includes('"content":"# Auth spec"'))
+  // Read only: no Edit, no Todo tab.
+  assert.equal(view.find({ text: 'Edit' }), null)
+  await view.press({ text: 'Back' })
+  assert.ok(view.find({ text: 'Planning' }))
+  assert.deepEqual(view.errors, [])
+  assert.deepEqual(view.refusals, [])
+  await view.unmount()
+})
+
+test('a problem still says No project to show, with the reason', async () => {
+  const none: ChangesSnapshot = { checkedAt: 1, views: [], problem: 'No workspace is focused' }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => none }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.ok(JSON.stringify(view.tree()).includes('No project to show'))
+  assert.ok(JSON.stringify(view.tree()).includes('No workspace is focused'))
+  assert.equal(view.find({ text: 'Project' }), null)
+  await view.unmount()
+})
+
+test('a long archive shows five names, then all of them on Show all', async () => {
+  const names = Array.from({ length: 7 }, (_, i) => `2026-01-0${i + 1}-c${i + 1}`)
+  const long: ChangesSnapshot = { checkedAt: 1, views: [emptyView({ archive: names, specs: [] }, true)] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => long }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.ok(view.find({ text: names[4] }))
+  assert.equal(view.find({ text: names[5] }), null)
+  await view.press({ text: 'Show all 7' })
+  assert.ok(view.find({ text: names[6] }))
+  await view.press({ text: 'Show fewer' })
+  assert.equal(view.find({ text: names[5] }), null)
+  await view.unmount()
+})
+
+test('a project with no OpenSpec at all says so, with no empty Archive or Specs lists', async () => {
+  const plain: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: [] }, true), changes: null }] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => plain }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.ok(JSON.stringify(view.tree()).includes('No OpenSpec here'))
+  assert.equal(view.find({ text: 'Archive' }), null)
+  assert.equal(view.find({ text: 'Specs' }), null)
+  await view.unmount()
+})
+
+test('a project with main specs but no openspec/changes shows the empty stages and its Specs', async () => {
+  const specsOnly: ChangesSnapshot = { checkedAt: 1, views: [{ ...emptyView({ archive: [], specs: ['auth'] }, true), changes: null }] }
+  const view = await mount(panel, { host: mockHost({ requests: { 'changes.get': () => specsOnly }, results: { 'agents.list': () => ({ agents: [] }) } }) })
+  assert.equal(JSON.stringify(view.tree()).includes('No OpenSpec here'), false)
+  assert.ok(view.find({ text: 'Planning' }))
+  assert.ok(view.find({ text: 'auth' }))
+  await view.unmount()
+})

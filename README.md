@@ -53,6 +53,11 @@ When a change is ready, press Apply to send it to a running agent terminal.
   The buttons always show. When Apply cannot run (sibling worktree, change not Ready or In progress,
   no agent picked) the button is greyed out and its tooltip gives the reason.
   The plugin checks that the task is still an unticked line of `tasks.md` before it types anything.
+- **Archive and Specs.** When a workspace has no active change, two lists show below the empty stages. A project with no OpenSpec
+  at all shows "No OpenSpec here" only.
+  "Archive" holds the folders of `openspec/changes/archive`, newest first. "Specs" holds the folders of
+  `openspec/specs`. Each list shows five names, with "Show all" for the rest. Press Open to read the
+  files in the same viewer as a change. These files are read only: no Edit, no Todo tab, no Apply.
 
 ## Stages
 
@@ -71,6 +76,9 @@ run the `openspec` CLI.
 - Local workspaces only. Remote (SSH or WSL) workspaces show a message.
 - Orca's plugin API does not expose parent and child worktree links, so a child worktree appears as a
   sibling. A future host API field (`parentWorkspaceId` on `workspace.list`) would allow a child view.
+- Orca names the focused workspace by id, and the panel uses it. Older Orca versions send no id, so the panel
+  falls back to the branch. When only one workspace is on that branch, the panel shows it. When several
+  are, the name must also match, or the panel says it cannot tell which is focused.
 
 ## Develop
 
