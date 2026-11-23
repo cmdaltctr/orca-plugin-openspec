@@ -1,6 +1,6 @@
 // The worker's logic. `register` takes the Io so tests can replace the disk and git.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { listChangeFiles, openTasks, readChanges, type Files } from './change-progress'
+import { AREA_ROOT, isFolderName, listChangeFiles, openTasks, readChanges, readLibrary, type Files } from './change-progress'
 import { writeOrder, writePin } from './change-order'
 import type { ChangeRef, ChangesSnapshot, WorkspaceView } from './protocol'
 
@@ -39,31 +39,47 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
   /** Folder of each workspace the last look listed. The panel never sends a path. */
   const paths = new Map<string, string>()
 
+  /** The library (archive and specs) is read only when no change is active. */
   const toView = async (workspace: Workspace, focused: boolean): Promise<WorkspaceView> => {
     paths.set(workspace.id, workspace.path)
+    const changes = await readChanges(io, workspace.path)
     return {
       workspaceId: workspace.id,
       name: workspace.name,
       folder: workspace.path.split(/[\\/]/).filter(Boolean).pop() ?? workspace.name,
       branch: workspace.branch,
       focused,
-      changes: await readChanges(io, workspace.path)
+      changes,
+      ...(!changes?.length ? { library: await readLibrary(io, workspace.path) } : {})
     }
   }
 
-  /** Absolute path of a file of a change the last look listed; null for anything else. */
-  async function resolveFile(ref: ChangeRef, path: string | null): Promise<string | null> {
+  /** A view the last look listed: the focused workspace or a sibling. */
+  const shownView = (workspaceId: string): WorkspaceView | undefined => last?.views.find((v) => v.workspaceId === workspaceId)
+
+  /** Absolute folder of a change, archived change or main spec the last look listed; null for anything else. */
+  async function changeDir(ref: ChangeRef): Promise<string | null> {
     const workspacePath = paths.get(ref.workspaceId)
-    const listed = last?.views.find((v) => v.workspaceId === ref.workspaceId)?.changes?.some((c) => c.name === ref.changeName)
-    if (!workspacePath || !listed) {
+    const view = shownView(ref.workspaceId)
+    if (!workspacePath || !view) {
       return null
     }
-    if (path === null) {
-      return `${workspacePath}/openspec/changes/${ref.changeName}`
+    const root = `${workspacePath}/${AREA_ROOT[ref.area ?? 'changes']}`
+    // Live changes are the ones the look listed; the archive and specs are read from disk, and only a real folder name passes.
+    const listed =
+      ref.area === undefined || ref.area === 'changes'
+        ? view.changes?.some((c) => c.name === ref.changeName)
+        : ((await io.list(root)) ?? []).filter(isFolderName).includes(ref.changeName)
+    return listed ? `${root}/${ref.changeName}` : null
+  }
+
+  /** Absolute path of a file of that folder; only a path the folder really lists, so `..` or any other file never gets through. */
+  async function resolveFile(ref: ChangeRef, path: string): Promise<string | null> {
+    const dir = await changeDir(ref)
+    if (!dir) {
+      return null
     }
-    // Only a path the change really lists, so `..` or any other file never gets through.
-    const files = await listChangeFiles(io, workspacePath, ref.changeName)
-    return files.includes(path) ? `${workspacePath}/openspec/changes/${ref.changeName}/${path}` : null
+    return (await listChangeFiles(io, dir, ref.area)).includes(path) ? `${dir}/${path}` : null
   }
 
   /** The one workspace Orca shows. `workspaceId` wins when Orca names it; otherwise branch and name must pick exactly one, or no project is shown. */
@@ -122,9 +138,8 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
   })
 
   orca.panels.handle('file.list', async (ref) => {
-    const workspacePath = paths.get(ref.workspaceId)
-    const known = (await resolveFile(ref, null)) !== null
-    return { files: workspacePath && known ? await listChangeFiles(io, workspacePath, ref.changeName) : [] }
+    const dir = await changeDir(ref)
+    return { files: dir ? await listChangeFiles(io, dir, ref.area) : [] }
   })
 
   orca.panels.handle('file.read', async (ref) => {
@@ -133,8 +148,9 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
   })
 
   orca.panels.handle('file.write', async (ref) => {
+    // Only a live change of the focused workspace can be saved; the archive and specs are read only.
     const focused = last?.views.find((v) => v.workspaceId === ref.workspaceId)?.focused
-    const file = focused ? await resolveFile(ref, ref.path) : null
+    const file = focused && (ref.area ?? 'changes') === 'changes' ? await resolveFile(ref, ref.path) : null
     if (!file) {
       return { ok: false, message: 'That file cannot be saved from here' }
     }
@@ -169,7 +185,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
 
   orca.panels.handle('change.pin', async ({ workspaceId, changeName, pin }) => {
     // Any worktree the last look listed: pins only sort the board, so siblings can be pinned from All worktrees.
-    const view = last?.views.find((v) => v.workspaceId === workspaceId)
+    const view = shownView(workspaceId)
     if (!view?.changes?.some((c) => c.name === changeName)) {
       return { ok: false, message: 'That change cannot be pinned from here' }
     }

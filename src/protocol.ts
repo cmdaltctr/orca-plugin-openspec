@@ -20,6 +20,15 @@ export interface ChangeRow {
   tasks: Count
 }
 
+/** Where a folder of markdown files sits under openspec: the live changes, the archive, or the main specs. */
+export type ChangeArea = 'changes' | 'archive' | 'specs'
+
+/** Folder names under openspec/changes/archive (newest first) and openspec/specs. */
+export interface Library {
+  archive: string[]
+  specs: string[]
+}
+
 /** The changes of one workspace. `focused` is the workspace Orca shows now; the rest are git siblings. */
 export interface WorkspaceView {
   workspaceId: string
@@ -30,12 +39,16 @@ export interface WorkspaceView {
   focused: boolean
   /** null when the workspace has no openspec/changes folder. */
   changes: ChangeRow[] | null
+  /** Set when the workspace has no active change. */
+  library?: Library
 }
 
-/** One change of one workspace, as the panel names it. */
+/** One change of one workspace, as the panel names it. `changeName` is the folder name in `area`. */
 export interface ChangeRef {
   workspaceId: string
   changeName: string
+  /** Defaults to `changes`. `archive` and `specs` are read only. */
+  area?: ChangeArea
 }
 
 export interface ChangesSnapshot {
@@ -50,7 +63,7 @@ declare module 'orca' {
   interface PluginRequests {
     /** Looks again at the focused workspace and its git siblings. */
     'changes.get': { output: ChangesSnapshot }
-    /** The markdown files of one change: proposal, design, tasks and each spec. Paths are relative to the change folder. */
+    /** The markdown files of one change, archived change or main spec. Paths are relative to its folder. */
     'file.list': { input: ChangeRef; output: { files: string[] } }
     'file.read': { input: ChangeRef & { path: string }; output: { text: string | null } }
     /** Saves a file of a change in the focused workspace. Sibling worktrees are read only. */

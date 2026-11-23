@@ -24,6 +24,12 @@ const TASKS: Record<string, string> = {
   '/p/omrs-v3/openspec/changes/alpha/design.md': '',
   '/p/omrs-v3/openspec/changes/alpha/specs/s/spec.md': '',
   '/p/omrs/openspec/changes/main-only/proposal.md': '',
+  '/p/omrs/openspec/changes/archive/2026-01-02-old-one/proposal.md': '# Old',
+  '/p/omrs/openspec/changes/archive/2026-03-04-newer/proposal.md': '# Newer',
+  '/p/omrs/openspec/changes/archive/2026-03-04-newer/specs/auth/spec.md': '# Newer auth',
+  '/p/omrs/openspec/specs/auth/spec.md': '# Auth spec',
+  '/p/omrs/openspec/specs/README.md': 'not a spec',
+  '/p/omrs-feat-x/openspec/specs/billing/spec.md': '# Billing spec',
   '/p/other/openspec/changes/secret/proposal.md': ''
 }
 
@@ -111,6 +117,40 @@ test('picks the focused workspace by id when several share the branch and name',
   assert.equal(fallback.views[0]?.workspaceId, 'w-main')
   await worker.deactivate()
   await stale.deactivate()
+})
+
+test('a workspace with no active change carries its archive and specs; one with changes does not', async () => {
+  const empty = await mount(focus('feat/x', 'omrs-feat-x'))
+  const [view] = (await empty.request('changes.get')).views
+  assert.equal(view?.changes, null)
+  assert.deepEqual(view?.library, { archive: [], specs: ['billing'] })
+  const busy = await mount(focus('v3', 'omrs-v3'))
+  assert.equal((await busy.request('changes.get')).views[0]?.library, undefined)
+  await empty.deactivate()
+  await busy.deactivate()
+})
+
+test('archive and specs files are read only and only real folders of the listed workspace open', async () => {
+  const worker = await mount(focus('feat/x', 'omrs-feat-x'))
+  await worker.request('changes.get')
+  const billing = { workspaceId: 'w-feat', changeName: 'billing', area: 'specs' as const }
+  assert.deepEqual((await worker.request('file.list', billing)).files, ['spec.md'])
+  assert.equal((await worker.request('file.read', { ...billing, path: 'spec.md' })).text, '# Billing spec')
+  // An archived change of a sibling worktree reads like a live one: files in order, newest folder first in the library.
+  const newer = { workspaceId: 'w-main', changeName: '2026-03-04-newer', area: 'archive' as const }
+  assert.deepEqual((await worker.request('file.list', newer)).files, ['proposal.md', 'specs/auth/spec.md'])
+  assert.equal((await worker.request('file.read', { ...newer, path: 'proposal.md' })).text, '# Newer')
+  // Saving is refused, even in the focused worktree.
+  assert.equal((await worker.request('file.write', { ...billing, path: 'spec.md', text: 'x' })).ok, false)
+  assert.equal(written['/p/omrs-feat-x/openspec/specs/billing/spec.md'], undefined)
+  // A name that is not a folder of the area, a dot-dot name and a workspace the look did not list are refused.
+  assert.equal((await worker.request('file.list', { ...billing, changeName: 'nope' })).files.length, 0)
+  assert.equal((await worker.request('file.list', { ...billing, changeName: '../changes' })).files.length, 0)
+  assert.equal((await worker.request('file.list', { ...billing, workspaceId: 'w-other', changeName: 'billing' })).files.length, 0)
+  // A sibling worktree of the same repository can be read.
+  assert.deepEqual((await worker.request('file.list', { ...billing, workspaceId: 'w-main', changeName: 'auth' })).files, ['spec.md'])
+  assert.equal((await worker.request('file.read', { ...billing, path: '../../../etc/passwd' })).text, null)
+  await worker.deactivate()
 })
 
 test('apply types the command only for a ready or in-progress change of the focused view', async () => {
