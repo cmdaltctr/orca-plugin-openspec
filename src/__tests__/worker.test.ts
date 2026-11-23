@@ -30,6 +30,9 @@ const TASKS: Record<string, string> = {
   '/p/omrs/openspec/specs/auth/spec.md': '# Auth spec',
   '/p/omrs/openspec/specs/README.md': 'not a spec',
   '/p/omrs-feat-x/openspec/specs/billing/spec.md': '# Billing spec',
+  '/p/omrs-feat-x/openspec/specs/notes.txt': 'a stray file, not a spec',
+  '/p/omrs-feat-x/openspec/changes/archive/notes.txt': 'a stray file, not a change',
+  '/p/omrs-feat-x/openspec/changes/archive/2026-02-01-shipped/proposal.md': '# Shipped',
   '/p/other/openspec/changes/secret/proposal.md': ''
 }
 
@@ -122,8 +125,8 @@ test('picks the focused workspace by id when several share the branch and name',
 test('a workspace with no active change carries its archive and specs; one with changes does not', async () => {
   const empty = await mount(focus('feat/x', 'omrs-feat-x'))
   const [view] = (await empty.request('changes.get')).views
-  assert.equal(view?.changes, null)
-  assert.deepEqual(view?.library, { archive: [], specs: ['billing'] })
+  assert.deepEqual(view?.changes, [])
+  assert.deepEqual(view?.library, { archive: ['2026-02-01-shipped'], specs: ['billing'] })
   const busy = await mount(focus('v3', 'omrs-v3'))
   assert.equal((await busy.request('changes.get')).views[0]?.library, undefined)
   await empty.deactivate()
@@ -150,6 +153,15 @@ test('archive and specs files are read only and only real folders of the listed 
   // A sibling worktree of the same repository can be read.
   assert.deepEqual((await worker.request('file.list', { ...billing, workspaceId: 'w-main', changeName: 'auth' })).files, ['spec.md'])
   assert.equal((await worker.request('file.read', { ...billing, path: '../../../etc/passwd' })).text, null)
+  await worker.deactivate()
+})
+
+test('a stray file in the archive or specs folder is never listed and never opens', async () => {
+  const worker = await mount(focus('feat/x', 'omrs-feat-x'))
+  const [view] = (await worker.request('changes.get')).views
+  assert.deepEqual(view?.library, { archive: ['2026-02-01-shipped'], specs: ['billing'] })
+  assert.equal((await worker.request('file.list', { workspaceId: 'w-feat', changeName: 'notes.txt', area: 'archive' })).files.length, 0)
+  assert.equal((await worker.request('file.list', { workspaceId: 'w-feat', changeName: 'notes.txt', area: 'specs' })).files.length, 0)
   await worker.deactivate()
 })
 
